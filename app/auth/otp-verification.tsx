@@ -1,11 +1,12 @@
 import { BackButton } from '@/src/components/common/back-button';
 import GradientWrapper from '@/src/components/common/gradient-wrapper';
 import { AppText } from '@/src/components/forms/global-text';
+import API_CONFIG from '@/src/config/api';
 import Colors from '@/src/constants/colors';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Keyboard, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import {
     CodeField,
     Cursor,
@@ -17,7 +18,11 @@ const CELL_COUNT = 6;
 
 function OTPVerification() {
     const router = useRouter();
+    const params = useLocalSearchParams();
     const { t } = useTranslation();
+    const email = String(params.email || '');
+    const verificationId = String(params.verificationId || '');
+    const debugOtp = String(params.debugOtp || '');
 
     const [value, setValue] = useState('');
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -40,18 +45,28 @@ function OTPVerification() {
         setStatus('loading');
 
         try {
-            // Simulating network delay
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            const response = await fetch(API_CONFIG.AUTH.VALIDATE_EMAIL_OTP, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    app: 'Food Trckr',
+                },
+                body: JSON.stringify({
+                    email,
+                    otp: codeToVerify,
+                    verificationId,
+                    deviceId: Platform.OS,
+                }),
+            });
 
-            if (codeToVerify === '123456') {
-                setStatus('success');
-                setTimeout(() => {
-                    router.replace('/tabs/home');
-                }, 600);
-            } else {
-                setStatus('error');
-                setValue('');
+            if (!response.ok) {
+                throw new Error('Invalid verification code.');
             }
+
+            setStatus('success');
+            setTimeout(() => {
+                router.replace('/tabs/home');
+            }, 600);
         } catch (e) {
             setStatus('error');
             setValue('');

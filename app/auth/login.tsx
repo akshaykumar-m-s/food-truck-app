@@ -1,5 +1,6 @@
 import GradientWrapper from '@/src/components/common/gradient-wrapper';
 import { AppText } from '@/src/components/forms/global-text';
+import API_CONFIG from '@/src/config/api';
 import Colors from '@/src/constants/colors';
 import { auth } from '@/src/firebase';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -14,8 +15,6 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Image, Linking, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const API_BASE_URL = 'https://your-server-url.com';
 
 function LoginScreen() {
   const router = useRouter();
@@ -65,7 +64,7 @@ function LoginScreen() {
     deviceId: string;
     provider: string;
   }) => {
-    const response = await fetch(`${API_BASE_URL}/v1/auth/create_user_firebase`, {
+    const response = await fetch(API_CONFIG.AUTH.CREATE_USER_FIREBASE, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -80,6 +79,52 @@ function LoginScreen() {
     }
 
     return response.json();
+  };
+
+  const handleEmailLogin = async () => {
+    if (!email.trim()) {
+      Alert.alert('Login Error', 'Please enter a valid email address.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      console.log('Attempting login to:', API_CONFIG.AUTH.EMAIL_LOGIN);
+      const response = await fetch(API_CONFIG.AUTH.EMAIL_LOGIN, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          app: 'Food Trckr',
+        },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(`Server error: ${response.status} ${responseText}`);
+      }
+
+      const data = await response.json();
+      const verificationId = String(data.verificationId || '');
+      const debugOtp = String(data.debugOtp || '');
+
+      if (!verificationId) {
+        throw new Error('Failed to request OTP.');
+      }
+
+      if (__DEV__ && debugOtp) {
+        Alert.alert('Debug OTP', `Use this code: ${debugOtp}`);
+      }
+
+      router.push(
+        (`/auth/otp-verification?email=${encodeURIComponent(email.trim().toLowerCase())}&verificationId=${encodeURIComponent(verificationId)}&debugOtp=${encodeURIComponent(debugOtp)}`) as any,
+      );
+    } catch (error: any) {
+      showError(error?.message || 'Unable to request OTP.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const signInWithFirebaseUser = async (
@@ -204,6 +249,8 @@ function LoginScreen() {
               placeholderTextColor="#666"
               keyboardType="email-address"
               autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
             />
           </View>
 
@@ -228,7 +275,8 @@ function LoginScreen() {
 
           <TouchableOpacity
             style={styles.submitButton}
-            onPress={() => router.push('/auth/otp-verification')}
+            onPress={handleEmailLogin}
+            disabled={isLoading}
           >
             <AppText style={styles.submitButtonText}>{t('send_code_button_title')}</AppText>
           </TouchableOpacity>
