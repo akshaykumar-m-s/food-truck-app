@@ -46,7 +46,10 @@ export function AppText(props: TextProps) {
   return (
     <Text
       {...props}
-      style={[styles.defaultFont, resolveFontFamily(props.style)]}
+      style={[
+        styles.defaultFont,
+        resolveFontFamily(props.style as TextStyle | TextStyle[] | null | undefined),
+      ].filter(Boolean) as TextStyle[]}
     />
   );
 }
