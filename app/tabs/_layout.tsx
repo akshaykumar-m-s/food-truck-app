@@ -9,13 +9,17 @@ function TabLayout() {
 
     return (
         <Tabs
-            screenOptions={{
+            screenOptions={({ route }) => ({
                 headerShown: false,
                 tabBarShowLabel: false,
                 tabBarActiveTintColor: 'transparent',
                 tabBarInactiveTintColor: 'transparent',
-                tabBarStyle: styles.tabBar,
-            }}
+                gestureEnabled: route.name !== 'cart',
+                tabBarStyle: [
+                    styles.tabBar,
+                    route.name === 'cart' && { display: 'none' },
+                ],
+            })}
         >
             {[
                 { name: 'home', icon: 'home', lib: Feather },

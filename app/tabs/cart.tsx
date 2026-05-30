@@ -1,13 +1,9 @@
-import { AppText } from '@/src/components/forms/global-text';
-import Colors from '@/src/constants/colors';
-import { View } from 'react-native';
+import CartScreen from "@/components/features/cart/cart-screen";
 
-function CartScreen() {
+function Cart() {
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <AppText style={{ color: Colors.primary }}>Shopping Cart Screen</AppText>
-    </View>
+    <CartScreen />
   );
 }
 
-export default CartScreen;
+export default Cart;
