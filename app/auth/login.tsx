@@ -25,12 +25,14 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useAuth } from './auth-provider';
 
 WebBrowser.maybeCompleteAuthSession();
 
 function LoginScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -52,22 +54,6 @@ function LoginScreen() {
       selectAccount: true,
     }
   );
-
-  useEffect(() => {
-    checkExistingSession();
-  }, []);
-
-  const checkExistingSession = async () => {
-    try {
-      const token = await SecureStore.getItemAsync('accessToken');
-      if (token) {
-        // If a token exists, navigate to home immediately
-        router.replace('/tabs/home');
-      }
-    } catch (e) {
-      console.error('Failed to check session', e);
-    }
-  };
 
   useEffect(() => {
     if (response && response.type === 'success') {
@@ -142,11 +128,12 @@ function LoginScreen() {
         throw new Error('Failed to request OTP.');
       }
 
+      // Explicit relative path tracking within routing stack boundaries
       const targetPath = (`/auth/otp-verification?email=${encodeURIComponent(email.trim().toLowerCase())}&verificationId=${encodeURIComponent(verificationId)}&debugOtp=${encodeURIComponent(debugOtp)}`) as any;
 
       if (__DEV__ && debugOtp) {
         Alert.alert(
-          'Debug OTP', 
+          'Debug OTP',
           `Use this code: ${debugOtp}`,
           [{ text: 'OK', onPress: () => router.navigate(targetPath) }]
         );
@@ -180,10 +167,11 @@ function LoginScreen() {
     };
 
     const data = await createUserUsingFirebase(userPayload);
-    // Save tokens for persistence
     await SecureStore.setItemAsync('accessToken', data.accessToken);
     await SecureStore.setItemAsync('refreshToken', data.refreshToken);
-    router.replace('/tabs/home');
+
+    // 4. DYNAMICALLY UNLOCK STACK ROUTER GATES ON FEDERATED PASSTHROUGH SUCCESS
+    login();
   };
 
   const handleGoogleFirebaseSignIn = async (idToken: string, accessToken?: string) => {
@@ -290,12 +278,11 @@ function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.container}>
-            {/* Header Section */}
             <View style={styles.header}>
               <AppText style={styles.title} adjustsFontSizeToFit numberOfLines={1}>
                 {t('welcome')}
@@ -305,7 +292,6 @@ function LoginScreen() {
               </AppText>
             </View>
 
-            {/* Form Section */}
             <View style={styles.formSection}>
               <AppText style={styles.inputLabel}>
                 {t('get_otp_sub_title')}
@@ -326,7 +312,6 @@ function LoginScreen() {
                 />
               </View>
 
-              {/* Terms Checkbox */}
               <View style={styles.checkboxRow}>
                 <TouchableOpacity
                   style={[styles.checkbox, agreed && styles.checkboxChecked]}
@@ -354,14 +339,12 @@ function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Divider */}
             <View style={styles.dividerContainer}>
               <View style={styles.line} />
               <AppText style={styles.dividerText}>{t('or')}</AppText>
               <View style={styles.line} />
             </View>
 
-            {/* Social Login Section */}
             <View style={styles.socialSection}>
               <AppText style={styles.socialTitle}>{t('sign_in')}</AppText>
               <View style={styles.socialButtonsRow}>
@@ -389,73 +372,27 @@ const styles = StyleSheet.create({
   header: { marginBottom: 50 },
   title: { fontSize: 42, color: '#FFF', fontWeight: 'bold', marginBottom: 20 },
   subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', lineHeight: 22 },
-
   formSection: { marginBottom: 40 },
   inputLabel: { color: '#FFF', fontSize: 14, marginBottom: 15, textAlign: 'center' },
-  inputContainer: {
-    backgroundColor: '#F5F3F7',
-    borderRadius: 15,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    marginBottom: 20,
-  },
+  inputContainer: { backgroundColor: '#F5F3F7', borderRadius: 15, paddingHorizontal: 15, paddingVertical: 10, marginBottom: 20 },
   floatingLabel: { color: '#7B4D8A', fontSize: 12, fontWeight: '600' },
   input: { fontSize: 16, color: Colors.primary, marginTop: 5 },
-
   checkboxRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 30 },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#76E49D',
-    marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
-  },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#76E49D', marginRight: 12, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
   checkboxChecked: { backgroundColor: '#76E49D' },
   checkMark: { color: Colors.primary, fontSize: 14, fontWeight: 'bold' },
-  termsText: { flex: 1, color: '#FFF', fontSize: 12, lineHeight: 18 },
-  linkText: { textDecorationLine: 'underline', fontWeight: 'bold' },
-  privacyText: {
-    fontSize: 14,
-    color: '#FFF',
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  link: {
-    color: '#FFF',
-    textDecorationLine: 'underline',
-  },
-
-  submitButton: {
-    backgroundColor: '#76E49D',
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
+  privacyText: { fontSize: 14, color: '#FFF', flex: 1, flexWrap: 'wrap' },
+  link: { color: '#FFF', textDecorationLine: 'underline' },
+  submitButton: { backgroundColor: '#76E49D', height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center' },
+  submitButtonDisabled: { opacity: 0.5 },
   submitButtonText: { color: Colors.primary, fontSize: 18, fontWeight: 'bold' },
-
   dividerContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 40 },
   line: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.3)' },
   dividerText: { color: '#FFF', marginHorizontal: 15, fontSize: 14 },
-
   socialSection: { alignItems: 'center' },
   socialTitle: { color: '#FFF', fontSize: 24, marginBottom: 25 },
   socialButtonsRow: { flexDirection: 'row', gap: 20 },
-  socialCircle: {
-    width: 65,
-    height: 65,
-    borderRadius: 35,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  socialCircle: { width: 65, height: 65, borderRadius: 35, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center' },
   socialIcon: { width: 30, height: 30, resizeMode: 'contain' }
 });
 

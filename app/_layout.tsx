@@ -1,3 +1,4 @@
+import Colors from '@/src/constants/colors';
 import { useFonts } from '@expo-google-fonts/inter';
 import { Stack } from "expo-router";
 import * as SplashScreen from 'expo-splash-screen';
@@ -16,7 +17,15 @@ SplashScreen.preventAutoHideAsync();
 
 // Intermediate Navigator Component that manages view boundaries based on login state
 function RootStackNavigation() {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' }}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <Stack screenOptions={{
@@ -25,14 +34,15 @@ function RootStackNavigation() {
       gestureEnabled: true,          
       gestureDirection: 'horizontal' 
     }}>
-      {isLoggedIn ? (
-        // Stack tree segment exposed ONLY when authenticated
-        // This isolates your application from hitting or popping into auth forms
-        <Stack.Screen name="tabs" options={{ gestureEnabled: false }} />
-      ) : (
-        // Stack tree segment exposed ONLY when logged out
-        <Stack.Screen name="login" options={{ gestureEnabled: false }} />
-      )}
+      {/* FIXED: Keep a statically predictable, flat tree layout profile. 
+        Expo Router now handles dynamic redirection parameters safely without layout drops.
+      */}
+      <Stack.Screen name="index" />
+      <Stack.Screen name="tabs" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="cart-screen" />
+      <Stack.Screen name="product-detail-screen" />
+      <Stack.Screen name="auth/login" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="auth/otp-verification" />
     </Stack>
   );
 }

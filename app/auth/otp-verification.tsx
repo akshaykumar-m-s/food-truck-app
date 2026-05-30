@@ -14,6 +14,7 @@ import {
     useBlurOnFulfill,
     useClearByFocusCell,
 } from 'react-native-confirmation-code-field';
+import { useAuth } from './auth-provider';
 
 const CELL_COUNT = 6;
 
@@ -21,11 +22,15 @@ function OTPVerification() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const { t } = useTranslation();
+    const { login } = useAuth();
+    
     const email = String(params.email || '');
     const debugOtp = String(params.debugOtp || '');
 
+    // FIXED: Dynamically extract verificationId from the reactive params object on every thread cycle
+    const currentVerificationId = String(params.verificationId || '');
+
     const [value, setValue] = useState('');
-    const [currentVerificationId, setCurrentVerificationId] = useState(String(params.verificationId || ''));
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [resendSeconds, setResendSeconds] = useState(90);
     const resendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -83,10 +88,6 @@ function OTPVerification() {
         }, 1000);
     };
 
-    /**
-     * Updated Verification Logic
-     * Now accepts an optional 'code' parameter to verify immediately on input change
-     */
     const handleVerify = async (otpCode?: string) => {
         const codeToVerify = otpCode || value;
         if (codeToVerify.length !== CELL_COUNT) return;
@@ -98,28 +99,39 @@ function OTPVerification() {
             const response = await fetch(API_CONFIG.AUTH.VALIDATE_EMAIL_OTP, {
                 method: 'POST',
                 headers: {
+                    'Accept': 'application/json',
                     'Content-Type': 'application/json',
-                    app: 'Food Trckr',
+                    'app': 'Food Trckr',
                 },
                 body: JSON.stringify({
-                    email,
-                    otp: codeToVerify,
-                    verificationId: currentVerificationId,
+                    email: email.trim().toLowerCase(),
+                    otp: codeToVerify.trim(),
+                    // FIXED: Always pulls the most recent dynamic routing token value safely
+                    verificationId: currentVerificationId, 
+                    verificationID: currentVerificationId, 
                     deviceId: Platform.OS,
                 }),
             });
 
-            const data = await response.json();
+            const rawText = await response.text();
+            
+            let data: any = {};
+            try {
+                data = JSON.parse(rawText);
+            } catch (jsonParseError) {
+                throw new Error(`Server tracking fault (HTTP ${response.status}). HTML data unexpected.`);
+            }
 
             if (!response.ok || !data.accessToken) {
-                throw new Error(data.error || 'Invalid verification code.');
+                throw new Error(data.error || 'Invalid verification code or session expired.');
             }
 
             await SecureStore.setItemAsync('refreshToken', data.refreshToken);
+            await SecureStore.setItemAsync('accessToken', data.accessToken);
 
             setStatus('success');
             setTimeout(() => {
-                router.replace('/tabs/home');
+                login(); 
             }, 600);
         } catch (e: any) {
             setStatus('error');
@@ -146,14 +158,14 @@ function OTPVerification() {
                 throw new Error(data.error || 'Failed to resend OTP.');
             }
 
-            const newVerificationId = String(data.verificationId || '');
+            const updatedVerificationId = String(data.verificationId || '');
             const newDebugOtp = String(data.debugOtp || '');
 
-            if (!newVerificationId) {
+            if (!updatedVerificationId) {
                 throw new Error('Failed to request OTP.');
             }
 
-            setCurrentVerificationId(newVerificationId);
+            router.setParams({ verificationId: updatedVerificationId });
             setValue('');
             setStatus('idle');
             resetResendTimer();
@@ -169,14 +181,10 @@ function OTPVerification() {
         }
     };
 
-    /**
-     * New Handler for Auto-Trigger
-     * Checks if the user reached the digit limit
-     */
     const onTextChange = (text: string) => {
         setValue(text);
         if (text.length === CELL_COUNT) {
-            handleVerify(text); // Auto-trigger
+            handleVerify(text); 
         }
     };
 
@@ -204,7 +212,7 @@ function OTPVerification() {
                         ref={ref}
                         {...props}
                         value={value}
-                        onChangeText={onTextChange} // Updated to auto-trigger handler
+                        onChangeText={onTextChange} 
                         cellCount={CELL_COUNT}
                         rootStyle={styles.codeFieldRoot}
                         keyboardType="number-pad"
@@ -260,7 +268,6 @@ function OTPVerification() {
                 </View>
 
                 <View style={styles.footer}>
-                    {/* The button remains as a fallback or for re-submission if needed */}
                     <TouchableOpacity
                         style={[styles.submitButton, status === 'loading' && styles.disabledButton]}
                         onPress={() => handleVerify()}
