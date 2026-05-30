@@ -27,7 +27,7 @@ function OTPVerification() {
     const email = String(params.email || '');
     const debugOtp = String(params.debugOtp || '');
 
-    // FIXED: Dynamically extract verificationId from the reactive params object on every thread cycle
+    // Dynamically extract verificationId from the reactive params object on every thread cycle
     const currentVerificationId = String(params.verificationId || '');
 
     const [value, setValue] = useState('');
@@ -106,7 +106,6 @@ function OTPVerification() {
                 body: JSON.stringify({
                     email: email.trim().toLowerCase(),
                     otp: codeToVerify.trim(),
-                    // FIXED: Always pulls the most recent dynamic routing token value safely
                     verificationId: currentVerificationId, 
                     verificationID: currentVerificationId, 
                     deviceId: Platform.OS,
@@ -131,7 +130,11 @@ function OTPVerification() {
 
             setStatus('success');
             setTimeout(() => {
+                // 1. Flip your global authentication provider baseline context flag
                 login(); 
+                
+                // 2. FIXED: Explicitly advance the router directory focus directly into the workspace layout home segment
+                router.replace('/tabs/home'); 
             }, 600);
         } catch (e: any) {
             setStatus('error');
