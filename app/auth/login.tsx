@@ -8,11 +8,23 @@ import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from 'firebase/auth';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Image, Linking, Platform, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View
+} from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -24,21 +36,38 @@ function LoginScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   const isExpoGo = Constants.executionEnvironment === 'storeClient';
-  const IOS_GOOGLE_CLIENT_ID = '38982039206-u00krp4145kaqmn5iroeqqa3ftobceg6.apps.googleusercontent.com';
-  const WEB_GOOGLE_CLIENT_ID = '38982039206-1o2to0b758830jh3dm9okokkirpab3uk.apps.googleusercontent.com'; // Replace this with your Google Cloud Web OAuth client ID for Expo Go / browser proxy
-  const EXPO_PROXY_REDIRECT_URI = 'https://auth.expo.io/@akshaykumar-ms/food-truck-app';
+  const IOS_GOOGLE_CLIENT_ID = '424124368229-leo34m88t6tba32sluefju1hha05jt5c.apps.googleusercontent.com';
+  const configuredWebGoogleClientId = Constants.expoConfig?.extra?.googleOAuth?.webClientId;
+  const configuredAndroidGoogleClientId = Constants.expoConfig?.extra?.googleOAuth?.androidClientId;
+  const WEB_GOOGLE_CLIENT_ID = configuredWebGoogleClientId || IOS_GOOGLE_CLIENT_ID;
+  const ANDROID_GOOGLE_CLIENT_ID = configuredAndroidGoogleClientId || IOS_GOOGLE_CLIENT_ID;
 
   const [request, response, promptAsync] = Google.useAuthRequest(
     {
-      clientId: isExpoGo ? WEB_GOOGLE_CLIENT_ID : undefined,
-      iosClientId: !isExpoGo ? IOS_GOOGLE_CLIENT_ID : undefined,
+      clientId: WEB_GOOGLE_CLIENT_ID,
+      iosClientId: IOS_GOOGLE_CLIENT_ID,
+      androidClientId: ANDROID_GOOGLE_CLIENT_ID,
       webClientId: WEB_GOOGLE_CLIENT_ID,
-      responseType: 'id_token',
-      redirectUri: isExpoGo ? EXPO_PROXY_REDIRECT_URI : undefined,
       scopes: ['openid', 'profile', 'email'],
-      extraParams: { prompt: 'select_account' },
+      selectAccount: true,
     }
   );
+
+  useEffect(() => {
+    checkExistingSession();
+  }, []);
+
+  const checkExistingSession = async () => {
+    try {
+      const token = await SecureStore.getItemAsync('accessToken');
+      if (token) {
+        // If a token exists, navigate to home immediately
+        router.replace('/tabs/home');
+      }
+    } catch (e) {
+      console.error('Failed to check session', e);
+    }
+  };
 
   useEffect(() => {
     if (response && response.type === 'success') {
@@ -113,15 +142,19 @@ function LoginScreen() {
         throw new Error('Failed to request OTP.');
       }
 
-      if (__DEV__ && debugOtp) {
-        Alert.alert('Debug OTP', `Use this code: ${debugOtp}`);
-      }
+      const targetPath = (`/auth/otp-verification?email=${encodeURIComponent(email.trim().toLowerCase())}&verificationId=${encodeURIComponent(verificationId)}&debugOtp=${encodeURIComponent(debugOtp)}`) as any;
 
-      router.push(
-        (`/auth/otp-verification?email=${encodeURIComponent(email.trim().toLowerCase())}&verificationId=${encodeURIComponent(verificationId)}&debugOtp=${encodeURIComponent(debugOtp)}`) as any,
-      );
+      if (__DEV__ && debugOtp) {
+        Alert.alert(
+          'Debug OTP', 
+          `Use this code: ${debugOtp}`,
+          [{ text: 'OK', onPress: () => router.navigate(targetPath) }]
+        );
+      } else {
+        router.navigate(targetPath);
+      }
     } catch (error: any) {
-      showError(error?.message || 'Unable to request OTP.');
+      showError(error?.message || 'Unable to request OTP. Please check your connection.');
     } finally {
       setIsLoading(false);
     }
@@ -146,8 +179,11 @@ function LoginScreen() {
       provider,
     };
 
-    await createUserUsingFirebase(userPayload);
-    router.push('/tabs/home');
+    const data = await createUserUsingFirebase(userPayload);
+    // Save tokens for persistence
+    await SecureStore.setItemAsync('accessToken', data.accessToken);
+    await SecureStore.setItemAsync('refreshToken', data.refreshToken);
+    router.replace('/tabs/home');
   };
 
   const handleGoogleFirebaseSignIn = async (idToken: string, accessToken?: string) => {
@@ -163,8 +199,29 @@ function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
+    if (isExpoGo) {
+      Alert.alert(
+        'Google Sign-In',
+        'Google sign-in requires a development build because Expo Go cannot use this app\'s custom OAuth redirect scheme.',
+      );
+      return;
+    }
+
+    if (Platform.OS === 'android' && !configuredAndroidGoogleClientId) {
+      Alert.alert(
+        'Google Sign-In',
+        'Android Google sign-in needs an Android OAuth client ID in app.json.',
+      );
+      return;
+    }
+
     if (!request) {
       Alert.alert('Google Sign-In', 'Unable to initialize Google sign-in.');
+      return;
+    }
+
+    if (!agreed) {
+      Alert.alert(t('sign_in'), 'Please agree to the privacy policy to continue.');
       return;
     }
 
@@ -184,6 +241,11 @@ function LoginScreen() {
   const handleAppleLogin = async () => {
     if (Platform.OS !== 'ios') {
       Alert.alert('Apple Sign-In', 'Apple sign-in is only available on iOS devices.');
+      return;
+    }
+
+    if (!agreed) {
+      Alert.alert(t('sign_in'), 'Please agree to the privacy policy to continue.');
       return;
     }
 
@@ -224,95 +286,106 @@ function LoginScreen() {
 
   return (
     <GradientWrapper>
-      <View style={styles.container}>
-        {/* Header Section */}
-        <View style={styles.header}>
-          <AppText style={styles.title}>{t('welcome')}</AppText>
-          <AppText style={styles.subtitle}>
-            {t('welcome_quote')}
-          </AppText>
-        </View>
-
-        {/* Form Section */}
-        <View style={styles.formSection}>
-          <AppText style={styles.inputLabel}>
-            {t('get_otp_sub_title')}
-          </AppText>
-
-          <View style={styles.inputContainer}>
-            <AppText style={styles.floatingLabel}>{t('email_input_title')}</AppText>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="j.smith@food.trckr"
-              placeholderTextColor="#666"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              spellCheck={false}
-            />
-          </View>
-
-          {/* Terms Checkbox */}
-          <View style={styles.checkboxRow}>
-            <TouchableOpacity
-              style={[styles.checkbox, agreed && styles.checkboxChecked]}
-              onPress={() => setAgreed(!agreed)}
-            >
-              {agreed && <AppText style={styles.checkMark}>✓</AppText>}
-            </TouchableOpacity>
-            <AppText style={styles.privacyText}>
-              {t('privacy_note')}{' '}
-              <AppText
-                onPress={() => Linking.openURL('https://example.com/privacy')}
-                style={styles.link}
-              >
-                {t('privacy_note_link')}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.container}>
+            {/* Header Section */}
+            <View style={styles.header}>
+              <AppText style={styles.title} adjustsFontSizeToFit numberOfLines={1}>
+                {t('welcome')}
               </AppText>
-            </AppText>
-          </View>
+              <AppText style={styles.subtitle}>
+                {t('welcome_quote')}
+              </AppText>
+            </View>
 
-          <TouchableOpacity
-            style={styles.submitButton}
-            onPress={handleEmailLogin}
-            disabled={isLoading}
-          >
-            <AppText style={styles.submitButtonText}>{t('send_code_button_title')}</AppText>
-          </TouchableOpacity>
-        </View>
+            {/* Form Section */}
+            <View style={styles.formSection}>
+              <AppText style={styles.inputLabel}>
+                {t('get_otp_sub_title')}
+              </AppText>
 
-        {/* Divider */}
-        <View style={styles.dividerContainer}>
-          <View style={styles.line} />
-          <AppText style={styles.dividerText}>{t('or')}</AppText>
-          <View style={styles.line} />
-        </View>
+              <View style={styles.inputContainer}>
+                <AppText style={styles.floatingLabel}>{t('email_input_title')}</AppText>
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="email@example.com"
+                  placeholderTextColor="#666"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
+                />
+              </View>
 
-        {/* Social Login Section */}
-        <View style={styles.socialSection}>
-          <AppText style={styles.socialTitle}>{t('sign_in')}</AppText>
-          <View style={styles.socialButtonsRow}>
-            {/* Google Login - Always Visible */}
-            <TouchableOpacity style={styles.socialCircle} onPress={handleGoogleLogin}>
-              <Image source={require('../../assets/icons/google-logo.png')} style={styles.socialIcon} />
-            </TouchableOpacity>
+              {/* Terms Checkbox */}
+              <View style={styles.checkboxRow}>
+                <TouchableOpacity
+                  style={[styles.checkbox, agreed && styles.checkboxChecked]}
+                  onPress={() => setAgreed(!agreed)}
+                >
+                  {agreed && <AppText style={styles.checkMark}>✓</AppText>}
+                </TouchableOpacity>
+                <AppText style={styles.privacyText}>
+                  {t('privacy_note')}{' '}
+                  <AppText
+                    onPress={() => Linking.openURL('https://example.com/privacy')}
+                    style={styles.link}
+                  >
+                    {t('privacy_note_link')}
+                  </AppText>
+                </AppText>
+              </View>
 
-            {/* Apple Login - Only Visible on iOS */}
-            {Platform.OS === 'ios' && (
-              <TouchableOpacity style={styles.socialCircle} onPress={handleAppleLogin}>
-                <Image source={require('../../assets/icons/apple-logo.png')} style={styles.socialIcon} />
+              <TouchableOpacity
+                style={[styles.submitButton, (isLoading || !agreed || !email.includes('@')) && styles.submitButtonDisabled]}
+                onPress={handleEmailLogin}
+                disabled={isLoading || !agreed || !email.includes('@')}
+              >
+                <AppText style={styles.submitButtonText}>{t('send_code_button_title')}</AppText>
               </TouchableOpacity>
-            )}
+            </View>
+
+            {/* Divider */}
+            <View style={styles.dividerContainer}>
+              <View style={styles.line} />
+              <AppText style={styles.dividerText}>{t('or')}</AppText>
+              <View style={styles.line} />
+            </View>
+
+            {/* Social Login Section */}
+            <View style={styles.socialSection}>
+              <AppText style={styles.socialTitle}>{t('sign_in')}</AppText>
+              <View style={styles.socialButtonsRow}>
+                <TouchableOpacity style={styles.socialCircle} onPress={handleGoogleLogin}>
+                  <Image source={require('../../assets/icons/google-logo.png')} style={styles.socialIcon} />
+                </TouchableOpacity>
+
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity style={styles.socialCircle} onPress={handleAppleLogin}>
+                    <Image source={require('../../assets/icons/apple-logo.png')} style={styles.socialIcon} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
           </View>
-        </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </GradientWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 30, paddingTop: 40 },
+  scrollContent: { flexGrow: 1 },
+  container: { flex: 1, paddingHorizontal: 30, paddingVertical: 40 },
   header: { marginBottom: 50 },
   title: { fontSize: 42, color: '#FFF', fontWeight: 'bold', marginBottom: 20 },
   subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', lineHeight: 22 },
@@ -362,6 +435,9 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  submitButtonDisabled: {
+    opacity: 0.5,
   },
   submitButtonText: { color: Colors.primary, fontSize: 18, fontWeight: 'bold' },
 

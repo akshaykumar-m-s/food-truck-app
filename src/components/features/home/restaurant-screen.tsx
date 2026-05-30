@@ -1,12 +1,11 @@
 import { AppText } from '@/src/components/forms/global-text';
 import Colors from '@/src/constants/colors';
+import { cartManager } from '@/src/services/cart-manager';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { Dimensions, Image, ImageBackground, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, ImageBackground, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const { width } = Dimensions.get('window');
 
 // Mock Data for Categories and Items
 const CATEGORIES = ['Starter', 'Main', 'Salad', 'Drinks', 'Dessert'];
@@ -20,6 +19,7 @@ const MENU_ITEMS = [
     spice: 3,
     promo: 'Buy 1 Get 1 Free',
     promoColor: '#E11D48',
+    customizable: true,
     description: 'Crispy rice-lentil crepe with spiced potato masala, served with chutney and sambar.',
     image: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0',
   },
@@ -31,6 +31,7 @@ const MENU_ITEMS = [
     vegan: false,
     spice: 2,
     promo: undefined,
+    customizable: false,
     promoColor: '#F59E0B',
     description: 'Smoky grilled cottage cheese marinated in chef’s special spices.',
     image: 'https://images.unsplash.com/photo-1543353071-873f17a7a088',
@@ -43,37 +44,82 @@ const MENU_ITEMS = [
     vegan: true,
     spice: 3,
     promo: 'Count towards free item',
+    customizable: false,
     promoColor: '#F59E0B',
     description: 'Rich vegetable curry simmered in a fragrant spicy tomato gravy.',
     image: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836',
   },
 ];
 
+type MenuItem = (typeof MENU_ITEMS)[number];
+
 export const RestaurantScreen: React.FC = () => {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('Starter');
-  const [quantities, setQuantities] = useState<{ [key: number]: number }>({});
+  const [quantities, setQuantities] = useState<{ [key: string]: number }>(cartManager.getQuantities());
 
-  const handleIncrement = (id: number) => {
-    setQuantities(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
-  };
+  useEffect(() => {
+  // Subscribe directly to the upgraded central cart store object
+  const unsubscribe = cartManager.subscribe((latestStore) => {
+    const rawQuantities: { [key: string]: number } = {};
+    
+    // Map the deep object structure back into a simple flat ID-to-Quantity map
+    Object.keys(latestStore).forEach((instanceKey) => {
+      // Split the complex instance key to find the clean base item id
+      const baseId = instanceKey.split('_')[0]; 
+      rawQuantities[baseId] = (rawQuantities[baseId] || 0) + latestStore[instanceKey].qty;
+    });
 
-  const handleDecrement = (id: number) => {
-    setQuantities(prev => {
-      const currentQty = prev[id] || 0;
-      if (currentQty <= 1) {
-        const updated = { ...prev };
-        delete updated[id];
-        return updated;
-      }
-      return { ...prev, [id]: currentQty - 1 };
+    setQuantities(rawQuantities);
+  });
+  
+  return () => unsubscribe();
+}, []);
+
+  const openProductDetail = (item: MenuItem) => {
+    router.push({
+      pathname: '/product-detail-screen',
+      params: {
+        id: String(item.id),
+        name: item.name,
+        price: item.price,
+        rating: item.rating,
+        vegan: String(item.vegan),
+        spice: String(item.spice),
+        promo: item.promo ?? '',
+        promoColor: item.promoColor,
+        description: item.description,
+        image: item.image,
+      },
     });
   };
 
+  const handleIncrement = (item: MenuItem) => {
+    if (item.customizable) {
+      openProductDetail(item);
+    } else {
+      const idStr = String(item.id);
+      // Extract numeric price (e.g., "33 PLN" -> 33)
+      const priceNum = parseFloat(item.price.replace(/[^\d.]/g, ''));
+      cartManager.addConfiguredItem(idStr, item.name, priceNum, 1);
+    }
+  };
+
+  const handleDecrement = (item: MenuItem) => {
+    if (item.customizable) {
+      // For customizable items, the stepper should navigate to cart to manage specific configurations
+      router.push('../cart/cart-screen');
+    } else {
+      const idStr = String(item.id);
+      const currentQty = quantities[idStr] || 0;
+      cartManager.setQuantity(idStr, currentQty - 1);
+    }
+  };
+
   // Memoized count tracking sum across all unique active quantities
-  const totalCartCount = useMemo(() => {
-    return Object.values(quantities).reduce((sum, val) => sum + val, 0);
-  }, [quantities]);
+const totalCartCount = useMemo(() => {
+  return Object.values(quantities).reduce((sum, val) => sum + val, 0);
+}, [quantities]);
 
   return (
     <View style={styles.container}>
@@ -156,9 +202,10 @@ export const RestaurantScreen: React.FC = () => {
               <HorizontalMenuCard
                 key={item.id}
                 item={item}
-                quantity={quantities[item.id] || 0}
-                onIncrement={() => handleIncrement(item.id)}
-                onDecrement={() => handleDecrement(item.id)}
+                quantity={quantities[String(item.id)] || 0}
+                onPress={() => openProductDetail(item)}
+                onIncrement={() => handleIncrement(item)}
+                onDecrement={() => handleDecrement(item)}
               />
             ))}
           </ScrollView>
@@ -187,9 +234,10 @@ export const RestaurantScreen: React.FC = () => {
             <VerticalMenuCard
               key={item.id}
               item={item}
-              quantity={quantities[item.id] || 0}
-              onIncrement={() => handleIncrement(item.id)}
-              onDecrement={() => handleDecrement(item.id)}
+              quantity={quantities[String(item.id)] || 0}
+              onPress={() => openProductDetail(item)}
+              onIncrement={() => handleIncrement(item)}
+              onDecrement={() => handleDecrement(item)}
             />
           ))}
         </View>
@@ -197,7 +245,7 @@ export const RestaurantScreen: React.FC = () => {
 
       {/* Floating Action Bars Stack Context: View Cart takes layout precedence when populated */}
       {totalCartCount > 0 ? (
-        <TouchableOpacity style={styles.viewCartBar} activeOpacity={0.95} onPress={() => router.push('/cart-screen')}>
+        <TouchableOpacity style={styles.viewCartBar} activeOpacity={0.95} onPress={() => router.push({ pathname: '../cart/cart-screen' })}>
           <View style={styles.viewCartLeft}>
             <Feather name="shopping-cart" size={22} color="#FFF" />
             <AppText style={styles.viewCartTitle}>View Cart</AppText>
@@ -230,8 +278,8 @@ const StepperCounter = ({ count, onPlus, onMinus }: { count: number; onPlus: () 
 );
 
 // Horizontal Card View
-const HorizontalMenuCard = ({ item, quantity, onIncrement, onDecrement }: any) => (
-  <View style={styles.hCard}>
+const HorizontalMenuCard = ({ item, quantity, onPress, onIncrement, onDecrement }: any) => (
+  <TouchableOpacity style={styles.hCard} onPress={onPress} activeOpacity={0.9}>
     <Image source={{ uri: item.image }} style={styles.hCardImage} />
     <View style={styles.hCardContent}>
       <AppText style={styles.itemName}>{item.name}</AppText>
@@ -273,12 +321,12 @@ const HorizontalMenuCard = ({ item, quantity, onIncrement, onDecrement }: any) =
         </View>
       </View>
     </View>
-  </View>
+  </TouchableOpacity>
 );
 
 // Vertical Card Row View
-const VerticalMenuCard = ({ item, quantity, onIncrement, onDecrement }: any) => (
-  <View style={styles.vCard}>
+const VerticalMenuCard = ({ item, quantity, onPress, onIncrement, onDecrement }: any) => (
+  <TouchableOpacity style={styles.vCard} onPress={onPress} activeOpacity={0.9}>
     <Image source={{ uri: item.image }} style={styles.vCardImage} />
     <View style={styles.vCardContent}>
       <AppText style={styles.itemName}>{item.name}</AppText>
@@ -319,7 +367,7 @@ const VerticalMenuCard = ({ item, quantity, onIncrement, onDecrement }: any) => 
         </View>
       </View>
     </View>
-  </View>
+  </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({

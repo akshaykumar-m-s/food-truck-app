@@ -1,57 +1,99 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Dimensions,
     ScrollView,
     StyleSheet,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import EmptyCartScreen from '@/src/components/features/cart/empty-cart-screen';
 import { AppText } from '@/src/components/forms/global-text';
 import Colors from '@/src/constants/colors';
+import { cartManager } from '@/src/services/cart-manager';
 
 const { width } = Dimensions.get('window');
 
-// Mock Data representing your exact cart items and special offer rows
-const INITIAL_CART_ITEMS = [
-    { id: 1, name: 'Butter Chicken with Ghee Topping', price: 30.0, quantity: 3 },
-    {
-        id: 2,
-        name: 'Avocado Toast',
-        price: 30.0,
-        quantity: 3,
-        subtext: 'Pepperoni (XXL)\nWybierz ciasto: Cienkie\nDodatki: Wołowina (6,98 PLN), Ananas (6,98 PLN), Sos śmietanowo-majo... (6,98 PLN)\nSos bazowy pizzy: Sos pomidorowy\nopłata za pudełko: opłata za pudełko x1 (1,99 PLN)'
-    },
-    { id: 3, name: 'Butter Chicken with Ghee Topping', price: 30.0, quantity: 3 },
-];
-
-const OFFER_ITEMS = [
-    { id: 101, title: 'Offer unlocked via Foodtracker! BUY 3 GET 1 FREE', name: 'Masala Dosa — FREE You bought 3', subtext: '(Your 4th one is on the house!)', originalPrice: 'PLN 30.00', finalPrice: 'PLN 00.00' },
-    { id: 102, title: 'Offer unlocked via Foodtracker! BUY 3 GET 1 FREE', name: 'Vada Set — FREE You bought 2', subtext: '• (Your 3rd one is on the house!)', originalPrice: 'PLN 12.00', finalPrice: 'PLN 00.00' },
-];
-
 export default function CartScreen() {
     const router = useRouter();
-    const [cartItems, setCartItems] = useState(INITIAL_CART_ITEMS);
+    const insets = useSafeAreaInsets();
+    
+    // Subscribe directly to the live structured store dictionary data
+    const [cartStore, setCartStore] = useState(cartManager.getCartStore());
+    const [instructions, setInstructions] = useState('');
 
-    const updateQuantity = (id: number, increment: boolean) => {
-        setCartItems(prev =>
-            prev.map(item => {
-                if (item.id === id) {
-                    const newQty = increment ? item.quantity + 1 : item.quantity - 1;
-                    return newQty > 0 ? { ...item, quantity: newQty } : item;
-                }
-                return item;
-            }).filter(item => item.quantity > 0)
-        );
+    useEffect(() => {
+      const unsubscribe = cartManager.subscribe((latestStore) => {
+        setCartStore(latestStore);
+      });
+      return () => unsubscribe();
+    }, []);
+
+    // Format the items from the cart manager so they work with our layout list renderer
+    const activeCartItems = useMemo(() => {
+      return Object.entries(cartStore)
+        .filter(([, item]) => item.qty > 0)
+        .map(([instanceKey, item]) => ({
+          instanceKey,
+          name: item.name,
+          price: item.price,
+          quantity: item.qty,
+          subtext: item.subtext,
+        }));
+    }, [cartStore]);
+
+    const updateQuantity = (instanceKey: string, increment: boolean) => {
+        const currentQty = cartStore[instanceKey]?.qty || 0;
+        const targetQty = increment ? currentQty + 1 : currentQty - 1;
+        cartManager.setQuantity(instanceKey, targetQty);
     };
+
+    // Financial Calculation Engines
+    const financialSummary = useMemo(() => {
+      const subtotal = activeCartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const totalUnitsCount = activeCartItems.reduce((sum, item) => sum + item.quantity, 0);
+      
+      let freeDosaDiscount = 0;
+      let freeVadaDiscount = 0;
+      let conditionalPromoDiscount = 0;
+
+      if (subtotal > 0) {
+        if (totalUnitsCount >= 3) {
+          freeDosaDiscount = 8.00;
+          conditionalPromoDiscount = 22.00;
+        }
+        if (totalUnitsCount >= 2) {
+          freeVadaDiscount = 18.00;
+        }
+      }
+
+      const aggregateDiscounts = freeDosaDiscount + freeVadaDiscount + conditionalPromoDiscount;
+      const definitiveTotal = Math.max(0, subtotal - aggregateDiscounts);
+      const computedWalletSavings = aggregateDiscounts + 15.50;
+
+      return {
+        subtotal: subtotal.toFixed(2),
+        freeDosaDiscount: freeDosaDiscount.toFixed(2),
+        freeVadaDiscount: freeVadaDiscount.toFixed(2),
+        conditionalPromoDiscount: conditionalPromoDiscount.toFixed(2),
+        definitiveTotal: definitiveTotal.toFixed(2),
+        computedWalletSavings: computedWalletSavings.toFixed(2)
+      };
+    }, [activeCartItems]);
+
+    const hasItemsInCart = activeCartItems.length > 0;
+
+    if (!hasItemsInCart) {
+        return <EmptyCartScreen />;
+    }
 
     return (
         <View style={styles.container}>
-            <SafeAreaView edges={['top']} style={styles.safeArea}>
+            <SafeAreaView edges={['top', 'bottom']} style={styles.safeArea}>
 
                 {/* Header Section */}
                 <View style={styles.header}>
@@ -61,7 +103,10 @@ export default function CartScreen() {
                     <AppText style={styles.headerTitle}>Your Cart</AppText>
                 </View>
 
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+                <ScrollView
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 + insets.bottom }]}
+                >
 
                     {/* Restaurant Sub-Header */}
                     <View style={styles.restaurantSection}>
@@ -83,54 +128,60 @@ export default function CartScreen() {
 
                     <AppText style={styles.sectionTitle}>Your products</AppText>
 
-                    {/* Standard Cart Products List */}
-                    {cartItems.map(item => (
-                        <View key={item.id} style={styles.productRow}>
+                    {/* Standard Live Cart Products List */}
+                    {activeCartItems.map(item => (
+                        <View key={item.instanceKey} style={styles.productRow}>
                             <View style={styles.quantitySquare}>
                                 <AppText style={styles.quantitySquareText}>{item.quantity}x</AppText>
                             </View>
+                            
                             <View style={styles.productDetails}>
                                 <AppText style={styles.productName}>{item.name}</AppText>
-                                {item.subtext && <AppText style={styles.productSubtext}>{item.subtext}</AppText>}
+                                {item.subtext ? (
+                                    <AppText style={styles.productSubtext}>{item.subtext}</AppText>
+                                ) : null}
+                            </View>
 
-                                <View style={styles.productFooter}>
-                                    <View style={styles.stepper}>
-                                        <TouchableOpacity onPress={() => updateQuantity(item.id, false)} style={styles.stepperAction}>
-                                            <Feather name="minus" size={14} color={Colors.primary} />
-                                        </TouchableOpacity>
+                            {/* Right Side Controls and Pricing Stack */}
+                            <View style={styles.productActionColumn}>
+                                <View style={styles.stepper}>
+                                    <TouchableOpacity onPress={() => updateQuantity(item.instanceKey, false)} style={styles.stepperAction}>
+                                        <Feather name="minus" size={14} color={Colors.primary} />
+                                    </TouchableOpacity>
+                                    <View style={styles.stepperValueBox}>
                                         <AppText style={styles.stepperValue}>{item.quantity}</AppText>
-                                        <TouchableOpacity onPress={() => updateQuantity(item.id, true)} style={styles.stepperAction}>
-                                            <Feather name="plus" size={14} color={Colors.primary} />
-                                        </TouchableOpacity>
                                     </View>
-                                    <AppText style={styles.productPrice}>PLN {(item.price * item.quantity).toFixed(2)}</AppText>
+                                    <TouchableOpacity onPress={() => updateQuantity(item.instanceKey, true)} style={styles.stepperAction}>
+                                        <Feather name="plus" size={14} color={Colors.primary} />
+                                    </TouchableOpacity>
                                 </View>
+                                <AppText style={styles.productPrice}>PLN {(item.price * item.quantity).toFixed(2)}</AppText>
                             </View>
                         </View>
                     ))}
 
                     {/* Unlocked Special Offer Rows */}
-                    {OFFER_ITEMS.map(offer => (
-                        <View key={offer.id} style={styles.offerContainer}>
-                            <View style={styles.offerHeaderBar}>
-                                <Feather name="gift" size={12} color="#FFF" />
-                                <AppText style={styles.offerHeaderBarText}>{offer.title}</AppText>
-                            </View>
-                            <View style={styles.offerBodyRow}>
-                                <View style={styles.offerItemBadge}>
-                                    <AppText style={styles.offerItemBadgeText}>1x</AppText>
-                                </View>
-                                <View style={styles.offerDetails}>
-                                    <AppText style={styles.offerItemName}>{offer.name}</AppText>
-                                    <AppText style={styles.offerItemSubtext}>{offer.subtext}</AppText>
-                                </View>
-                                <View style={styles.offerPriceContainer}>
-                                    <AppText style={styles.offerOriginalPrice}>{offer.originalPrice}</AppText>
-                                    <AppText style={styles.offerFinalPrice}>{offer.finalPrice}</AppText>
-                                </View>
-                            </View>
-                        </View>
-                    ))}
+                    {hasItemsInCart && (
+                      <View style={styles.offerContainer}>
+                          <View style={styles.offerHeaderBar}>
+                              <Feather name="gift" size={12} color="#FFF" />
+                              <AppText style={styles.offerHeaderBarText}>Offer unlocked via Foodtracker! BUY 3 GET 1 FREE</AppText>
+                          </View>
+                          <View style={styles.offerBodyRow}>
+                              <View style={styles.offerItemBadge}>
+                                  <AppText style={styles.offerItemBadgeText}>1x</AppText>
+                              </View>
+                              <View style={styles.offerDetails}>
+                                  <AppText style={styles.offerItemName}>Masala Dosa — FREE You bought 3</AppText>
+                                  <AppText style={styles.offerItemSubtext}>(Your 4th one is on the house!)</AppText>
+                              </View>
+                              <View style={styles.offerPriceContainer}>
+                                  <AppText style={styles.offerOriginalPrice}>PLN 30.00</AppText>
+                                  <AppText style={styles.offerFinalPrice}>PLN 00.00</AppText>
+                              </View>
+                          </View>
+                      </View>
+                    )}
 
                     {/* Add More Products Trigger Button */}
                     <TouchableOpacity style={styles.addMoreButton} onPress={() => router.back()}>
@@ -140,16 +191,24 @@ export default function CartScreen() {
                     {/* Cooking Instructions Text Box */}
                     <View style={styles.instructionsContainer}>
                         <AppText style={styles.instructionsTitle}>Cooking Instructions</AppText>
-                        <View style={styles.instructionsInputPlaceholder} />
+                        <TextInput
+                            style={styles.instructionsInput}
+                            placeholder="Add a note (e.g. no onions, extra spicy...)"
+                            placeholderTextColor="#9CA3AF"
+                            multiline
+                            value={instructions}
+                            onChangeText={setInstructions}
+                            textAlignVertical="top"
+                        />
                     </View>
 
-                    {/* Payment Breakdown Summary Layout */}
+                    {/* Live Financial Breakdown Summary Section */}
                     <View style={styles.paymentSummaryContainer}>
                         <AppText style={styles.summaryHeading}>Payment Summary</AppText>
 
                         <View style={styles.summaryRow}>
                             <AppText style={styles.summaryLabel}>Subtotal</AppText>
-                            <AppText style={styles.summaryValue}>PLN 30.00</AppText>
+                            <AppText style={styles.summaryValue}>PLN {financialSummary.subtotal}</AppText>
                         </View>
 
                         <View style={styles.summaryRow}>
@@ -157,51 +216,55 @@ export default function CartScreen() {
                             <AppText style={[styles.summaryValue, { color: '#10B981', fontWeight: '600' }]}>Free</AppText>
                         </View>
 
-                        <View style={styles.summaryRow}>
-                            <AppText style={styles.summaryLabel}>🎉 Free Masala Dosa (BUY 3 GET 1)</AppText>
-                            <AppText style={[styles.summaryValue, styles.discountText]}>-PLN 8.00</AppText>
-                        </View>
-
-                        <View style={styles.summaryRow}>
-                            <AppText style={styles.summaryLabel}>🎁 Free Vada Set (BUY 2 GET 1)</AppText>
-                            <AppText style={[styles.summaryValue, styles.discountText]}>-PLN 18.00</AppText>
-                        </View>
-
-                        <View style={styles.summaryRow}>
-                            <AppText style={styles.summaryLabel}>Promo (Buy 3, get 1 free)</AppText>
-                            <AppText style={[styles.summaryValue, styles.discountText]}>-PLN 22.00</AppText>
-                        </View>
+                        {hasItemsInCart && (
+                          <>
+                            <View style={styles.summaryRow}>
+                                <AppText style={styles.summaryLabel}>🎉 Free Masala Dosa (BUY 3 GET 1)</AppText>
+                                <AppText style={[styles.summaryValue, styles.discountText]}>-PLN {financialSummary.freeDosaDiscount}</AppText>
+                            </View>
+                            <View style={styles.summaryRow}>
+                                <AppText style={styles.summaryLabel}>Promo (Buy 3, get 1 free)</AppText>
+                                <AppText style={[styles.summaryValue, styles.discountText]}>-PLN {financialSummary.conditionalPromoDiscount}</AppText>
+                            </View>
+                          </>
+                        )}
 
                         <View style={styles.dividerLine} />
 
                         <View style={styles.totalRow}>
                             <AppText style={styles.totalLabel}>Total:</AppText>
-                            <AppText style={styles.totalValue}>PLN 98.00</AppText>
+                            <AppText style={styles.totalValue}>PLN {financialSummary.definitiveTotal}</AppText>
                         </View>
                     </View>
 
-                    {/* Success / Savings Highlight Bar */}
-                    <View style={styles.savingsHighlightBar}>
-                        <MaterialCommunityIcons name="percent" size={14} color="#16A34A" />
-                        <AppText style={styles.savingsHighlightText}>
-                            Great choice — you saved <AppText style={{ fontWeight: 'bold' }}>64,000 PLN!</AppText> today!
-                        </AppText>
+                    {/* Savings Notification Badge */}
+                    {hasItemsInCart && (
+                      <View style={styles.savingsHighlightBar}>
+                          <MaterialCommunityIcons name="percent" size={14} color="#16A34A" />
+                          <AppText style={styles.savingsHighlightText}>
+                              Great choice — you saved <AppText style={{ fontWeight: 'bold' }}>{financialSummary.computedWalletSavings} PLN!</AppText> today!
+                          </AppText>
+                      </View>
+                    )}
+
+                    </ScrollView>
+
+                {/* Sticky Checkout Action Component Container */}
+                <View style={[styles.footerContainer, { paddingBottom: 24 + insets.bottom }]}> 
+                    <TouchableOpacity 
+                      style={[styles.placeOrderButton, !hasItemsInCart && styles.disabledButton]} 
+                      activeOpacity={hasItemsInCart ? 0.9 : 1}
+                      disabled={!hasItemsInCart}
+                    >
+                        <AppText style={styles.placeOrderButtonText}>Place order</AppText>
+                    </TouchableOpacity>
+
+                    <View style={styles.securityRow}>
+                        <Feather name="lock" size={12} color="#6B7280" />
+                        <AppText style={styles.securityText}>Secure payments. Your data is protected.</AppText>
                     </View>
-
-                </ScrollView>
-            </SafeAreaView>
-
-            {/* Main Bottom Checkout Sticky Action Component Container */}
-            <View style={styles.footerContainer}>
-                <TouchableOpacity style={styles.placeOrderButton} activeOpacity={0.9}>
-                    <AppText style={styles.placeOrderButtonText}>Place order</AppText>
-                </TouchableOpacity>
-
-                <View style={styles.securityRow}>
-                    <Feather name="lock" size={12} color="#6B7280" />
-                    <AppText style={styles.securityText}>Secure payments. Your data is protected.</AppText>
                 </View>
-            </View>
+            </SafeAreaView>
         </View>
     );
 }
@@ -210,13 +273,9 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#FFF' },
     safeArea: { flex: 1 },
     scrollContent: { paddingHorizontal: 16, paddingBottom: 40 },
-
-    // Header Layout Styles
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, marginTop: 4 },
     backButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
     headerTitle: { fontSize: 32, fontWeight: 'bold', color: Colors.primary },
-
-    // Restaurant Profile Slat Styles
     restaurantSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
     restaurantLeft: { flex: 1 },
     restaurantName: { fontSize: 18, fontWeight: 'bold', color: Colors.primary },
@@ -226,26 +285,84 @@ const styles = StyleSheet.create({
     addressText: { fontSize: 12, color: '#6B7280' },
     directionsButton: { alignItems: 'center', justifyContent: 'center', paddingLeft: 12 },
     directionsText: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-
-    // General Sections Typography
+    emptyStateBox: { padding: 32, alignItems: 'center', justifyContent: 'center', gap: 12 },
+    emptyStateText: { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
     sectionTitle: { fontSize: 18, fontWeight: 'bold', color: Colors.primary, marginBottom: 16, marginTop: 8 },
+    
+    // Adjusted Products Row Styles to accommodate dynamic add-on subtexts
+    productRow: { 
+        flexDirection: 'row', 
+        paddingVertical: 14, 
+        borderBottomWidth: 1, 
+        borderBottomColor: '#F3F4F6',
+        alignItems: 'center'
+    },
+    quantitySquare: { 
+        width: 44, 
+        height: 44, 
+        backgroundColor: '#F7F6F9', 
+        borderRadius: 4, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginRight: 12 
+    },
+    quantitySquareText: { fontSize: 15, fontWeight: '500', color: '#1B041F' },
+    productDetails: { 
+        flex: 1,
+        paddingRight: 8
+    },
+    productName: { 
+        fontSize: 16, 
+        fontWeight: 'bold', 
+        color: '#1B041F',
+        lineHeight: 22
+    },
+    productSubtext: { 
+        fontSize: 11, 
+        color: '#4B5563', 
+        marginTop: 4, 
+        lineHeight: 16,
+        fontWeight: '400'
+    },
+    productActionColumn: { 
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        minWidth: 90
+    },
+    stepper: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        backgroundColor: '#F5F3F7', 
+        borderRadius: 15, 
+        height: 30, 
+        overflow: 'hidden'
+    },
+    stepperAction: { 
+        width: 30,
+        height: '100%', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+    },
+    stepperValueBox: {
+        paddingHorizontal: 8,
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    stepperValue: { 
+        fontSize: 15, 
+        fontWeight: 'bold', 
+        color: Colors.primary, 
+        textAlign: 'center' 
+    },
+    productPrice: { 
+        fontSize: 13, 
+        fontWeight: 'bold', 
+        color: '#1B041F',
+        marginTop: 8,
+        textAlign: 'center'
+    },
 
-    // Standard Item Card Grid Structural Styles
-    productRow: { flexDirection: 'row', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-    quantitySquare: { width: 40, height: 40, backgroundColor: '#F3F4F6', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-    quantitySquareText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
-    productDetails: { flex: 1 },
-    productName: { fontSize: 15, fontWeight: '600', color: Colors.primary },
-    productSubtext: { fontSize: 11, color: '#6B7280', marginTop: 4, lineHeight: 15 },
-    productFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
-    productPrice: { fontSize: 14, fontWeight: 'bold', color: Colors.primary },
-
-    // Embedded Custom Counter Components
-    stepper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, height: 30, backgroundColor: '#FFF' },
-    stepperAction: { paddingHorizontal: 10, justifyContent: 'center', alignItems: 'center', height: '100%' },
-    stepperValue: { fontSize: 14, fontWeight: 'bold', color: Colors.primary, minWidth: 16, textAlign: 'center' },
-
-    // Special Promotional Offers Presentation Grid Styles
     offerContainer: { borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#E5E7EB', marginVertical: 8, backgroundColor: '#F0FDF4' },
     offerHeaderBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16A34A', paddingVertical: 6, paddingHorizontal: 12 },
     offerHeaderBarText: { color: '#FFF', fontSize: 11, fontWeight: 'bold' },
@@ -258,15 +375,22 @@ const styles = StyleSheet.create({
     offerPriceContainer: { alignItems: 'flex-end', justifyContent: 'center' },
     offerOriginalPrice: { fontSize: 11, color: '#9CA3AF', textDecorationLine: 'line-through' },
     offerFinalPrice: { fontSize: 13, fontWeight: 'bold', color: Colors.primary, marginTop: 2 },
-
-    // Custom Action Trigger Intermediaries
     addMoreButton: { width: '100%', height: 48, backgroundColor: Colors.primary, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginVertical: 16 },
     addMoreButtonText: { color: '#FFF', fontSize: 15, fontWeight: 'bold' },
     instructionsContainer: { marginVertical: 8 },
     instructionsTitle: { fontSize: 14, fontWeight: 'bold', color: Colors.primary, marginBottom: 8 },
-    instructionsInputPlaceholder: { width: '100%', height: 72, backgroundColor: '#F9FAFB', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-
-    // Bottom Financial Table Breakdown Metrics
+    instructionsInput: { 
+        width: '100%', 
+        height: 72, 
+        backgroundColor: '#F9FAFB', 
+        borderRadius: 12, 
+        borderWidth: 1, 
+        borderColor: '#E5E7EB',
+        padding: 12,
+        fontSize: 14,
+        color: '#1B041F',
+        textAlignVertical: 'top'
+    },
     paymentSummaryContainer: { marginTop: 16, paddingVertical: 8 },
     summaryHeading: { fontSize: 18, fontWeight: 'bold', color: Colors.primary, marginBottom: 14 },
     summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 6 },
@@ -277,14 +401,11 @@ const styles = StyleSheet.create({
     totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
     totalLabel: { fontSize: 20, fontWeight: 'bold', color: Colors.primary },
     totalValue: { fontSize: 20, fontWeight: 'bold', color: Colors.primary },
-
-    // Marketing / Green Micro-Highlight Banners
     savingsHighlightBar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DCFCE7', padding: 12, borderRadius: 8, marginVertical: 16, justifyContent: 'center' },
     savingsHighlightText: { fontSize: 13, color: '#16A34A', textAlign: 'center' },
-
-    // Checkout Fixed View Context Bounding Geometry
     footerContainer: { paddingHorizontal: 16, paddingBottom: 24, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6', backgroundColor: '#FFF' },
     placeOrderButton: { width: '100%', height: 54, backgroundColor: Colors.primary, borderRadius: 27, justifyContent: 'center', alignItems: 'center' },
+    disabledButton: { backgroundColor: '#9CA3AF', opacity: 0.6 },
     placeOrderButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
     securityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
     securityText: { fontSize: 12, color: '#6B7280' },

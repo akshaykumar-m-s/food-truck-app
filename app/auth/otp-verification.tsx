@@ -4,9 +4,10 @@ import { AppText } from '@/src/components/forms/global-text';
 import API_CONFIG from '@/src/config/api';
 import Colors from '@/src/constants/colors';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import * as SecureStore from 'expo-secure-store';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Keyboard, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import {
     CodeField,
     Cursor,
@@ -21,17 +22,66 @@ function OTPVerification() {
     const params = useLocalSearchParams();
     const { t } = useTranslation();
     const email = String(params.email || '');
-    const verificationId = String(params.verificationId || '');
     const debugOtp = String(params.debugOtp || '');
 
     const [value, setValue] = useState('');
+    const [currentVerificationId, setCurrentVerificationId] = useState(String(params.verificationId || ''));
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [resendSeconds, setResendSeconds] = useState(90);
+    const resendTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const ref = useBlurOnFulfill({ value, cellCount: CELL_COUNT });
     const [props, getCellOnLayoutHandler] = useClearByFocusCell({
         value,
         setValue,
     });
+
+    useEffect(() => {
+        if (debugOtp && debugOtp.length === CELL_COUNT) {
+            setValue(debugOtp);
+            handleVerify(debugOtp);
+        }
+    }, []);
+
+    useEffect(() => {
+        resendTimerRef.current && clearInterval(resendTimerRef.current);
+        setResendSeconds(90);
+        resendTimerRef.current = setInterval(() => {
+            setResendSeconds((previous) => {
+                if (previous <= 1) {
+                    resendTimerRef.current && clearInterval(resendTimerRef.current);
+                    resendTimerRef.current = null;
+                    return 0;
+                }
+                return previous - 1;
+            });
+        }, 1000);
+
+        return () => {
+            resendTimerRef.current && clearInterval(resendTimerRef.current);
+        };
+    }, []);
+
+    const formatCountdown = (seconds: number) => {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+    };
+
+    const resetResendTimer = () => {
+        resendTimerRef.current && clearInterval(resendTimerRef.current);
+        setResendSeconds(90);
+        resendTimerRef.current = setInterval(() => {
+            setResendSeconds((previous) => {
+                if (previous <= 1) {
+                    resendTimerRef.current && clearInterval(resendTimerRef.current);
+                    resendTimerRef.current = null;
+                    return 0;
+                }
+                return previous - 1;
+            });
+        }, 1000);
+    };
 
     /**
      * Updated Verification Logic
@@ -54,22 +104,68 @@ function OTPVerification() {
                 body: JSON.stringify({
                     email,
                     otp: codeToVerify,
-                    verificationId,
+                    verificationId: currentVerificationId,
                     deviceId: Platform.OS,
                 }),
             });
 
-            if (!response.ok) {
-                throw new Error('Invalid verification code.');
+            const data = await response.json();
+
+            if (!response.ok || !data.accessToken) {
+                throw new Error(data.error || 'Invalid verification code.');
             }
+
+            await SecureStore.setItemAsync('refreshToken', data.refreshToken);
 
             setStatus('success');
             setTimeout(() => {
                 router.replace('/tabs/home');
             }, 600);
-        } catch (e) {
+        } catch (e: any) {
             setStatus('error');
             setValue('');
+            Alert.alert('Verification Error', e.message || 'Invalid verification code.');
+        }
+    };
+
+    const handleResend = async () => {
+        setStatus('loading');
+        try {
+            const response = await fetch(API_CONFIG.AUTH.EMAIL_LOGIN, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    app: 'Food Trckr',
+                },
+                body: JSON.stringify({ email: email.trim().toLowerCase() }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to resend OTP.');
+            }
+
+            const newVerificationId = String(data.verificationId || '');
+            const newDebugOtp = String(data.debugOtp || '');
+
+            if (!newVerificationId) {
+                throw new Error('Failed to request OTP.');
+            }
+
+            setCurrentVerificationId(newVerificationId);
+            setValue('');
+            setStatus('idle');
+            resetResendTimer();
+
+            if (__DEV__ && newDebugOtp) {
+                Alert.alert('Debug OTP', `New code: ${newDebugOtp}`);
+            } else {
+                Alert.alert('Resend Code', 'A new verification code has been sent to your email.');
+            }
+        } catch (error: any) {
+            Alert.alert('Resend Error', error?.message || 'Unable to request a new code.');
+            setStatus('idle');
         }
     };
 
@@ -112,7 +208,11 @@ function OTPVerification() {
                         cellCount={CELL_COUNT}
                         rootStyle={styles.codeFieldRoot}
                         keyboardType="number-pad"
-                        textContentType="oneTimeCode" // Enables iOS SMS auto-fill
+                        inputMode="numeric"
+                        textContentType="oneTimeCode"
+                        autoComplete={Platform.OS === 'android' ? 'sms-otp' : 'one-time-code'}
+                        importantForAutofill="yes"
+                        autoCorrect={false}
                         autoFocus={true}
                         renderCell={({ index, symbol, isFocused }) => {
                             const cellStyle = [
@@ -144,11 +244,15 @@ function OTPVerification() {
 
                     <View style={styles.resendContainer}>
                         <AppText style={styles.resendText}>
-                            {t('invalid_otp')}
+                            {resendSeconds > 0
+                                ? `Resend available in ${formatCountdown(resendSeconds)}`
+                                : `Didn't receive a code?`}
                         </AppText>
                         <TouchableOpacity
-                            onPress={() => console.log('Resend')}
-                            disabled={status === 'loading'}
+                            onPress={handleResend}
+                            disabled={status === 'loading' || resendSeconds > 0}
+                            activeOpacity={0.8}
+                            style={{ opacity: status === 'loading' || resendSeconds > 0 ? 0.5 : 1 }}
                         >
                             <AppText style={styles.resendAction}>{t('send_code_again')}</AppText>
                         </TouchableOpacity>

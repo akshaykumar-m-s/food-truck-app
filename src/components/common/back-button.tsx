@@ -2,15 +2,15 @@ import Colors from '@/src/constants/colors';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Platform, StyleSheet, TouchableOpacity } from 'react-native';
+import { Platform, StyleProp, StyleSheet, TouchableOpacity, ViewStyle } from 'react-native';
 
-export const BackButton = ({ color = Colors.primary }: { color?: string }) => {
+export const BackButton = ({ color = Colors.primary, style }: { color?: string; style?: StyleProp<ViewStyle> }) => {
     const router = useRouter();
 
     return (
         <TouchableOpacity
             onPress={() => router.back()}
-            style={styles.backButton}
+            style={[styles.backButton, style]}
             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
         >
             {Platform.OS === 'ios' ? (

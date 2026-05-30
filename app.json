@@ -9,12 +9,17 @@
       "assets/fonts/*",
       "assets/images/*"
     ],
-    "scheme": "food-truck-app",
+    "scheme": [
+      "food-truck-app",
+      "food-trckr",
+      "com.akshaykumarms.foodtruckapp"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.akshaykumarms.foodtruckapp",
+      "bundleIdentifier": "food-trckr",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true
     },
     "android": {
@@ -54,6 +59,18 @@
       "reactCompiler": true
     },
     "extra": {
+      "firebase": {
+        "apiKey": "AIzaSyAwkn5-of3ip8_g6HsI63UipE1CpY73GA4",
+        "authDomain": "foodtrckr-trail.firebaseapp.com",
+        "projectId": "foodtrckr-trail",
+        "storageBucket": "foodtrckr-trail.firebasestorage.app",
+        "messagingSenderId": "424124368229",
+        "appId": "1:424124368229:ios:be06258318de4bb0d38d8c"
+      },
+      "googleOAuth": {
+        "webClientId": "",
+        "androidClientId": ""
+      },
       "router": {},
       "eas": {
         "projectId": "741af9cf-ea95-44ea-bcba-6d218cf67017"
