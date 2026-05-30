@@ -60,12 +60,12 @@
     },
     "extra": {
       "firebase": {
-        "apiKey": "AIzaSyAwkn5-of3ip8_g6HsI63UipE1CpY73GA4",
-        "authDomain": "foodtrckr-trail.firebaseapp.com",
-        "projectId": "foodtrckr-trail",
-        "storageBucket": "foodtrckr-trail.firebasestorage.app",
-        "messagingSenderId": "424124368229",
-        "appId": "1:424124368229:ios:be06258318de4bb0d38d8c"
+        "apiKey": "",
+        "authDomain": "",
+        "projectId": "",
+        "storageBucket": "",
+        "messagingSenderId": "",
+        "appId": ""
       },
       "googleOAuth": {
         "webClientId": "",

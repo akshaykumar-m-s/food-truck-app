@@ -108,7 +108,7 @@ export const RestaurantScreen: React.FC = () => {
   const handleDecrement = (item: MenuItem) => {
     if (item.customizable) {
       // For customizable items, the stepper should navigate to cart to manage specific configurations
-      router.push('../cart/cart-screen');
+      router.push('/cart-screen');
     } else {
       const idStr = String(item.id);
       const currentQty = quantities[idStr] || 0;
@@ -245,7 +245,7 @@ const totalCartCount = useMemo(() => {
 
       {/* Floating Action Bars Stack Context: View Cart takes layout precedence when populated */}
       {totalCartCount > 0 ? (
-        <TouchableOpacity style={styles.viewCartBar} activeOpacity={0.95} onPress={() => router.push({ pathname: '../cart/cart-screen' })}>
+        <TouchableOpacity style={styles.viewCartBar} activeOpacity={0.95} onPress={() => router.push({ pathname: '/cart-screen' })}>
           <View style={styles.viewCartLeft}>
             <Feather name="shopping-cart" size={22} color="#FFF" />
             <AppText style={styles.viewCartTitle}>View Cart</AppText>
