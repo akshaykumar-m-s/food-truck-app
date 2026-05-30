@@ -4,6 +4,7 @@ import Colors from "@/src/constants/colors";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "app/auth/auth-provider";
 import Constants from "expo-constants";
+import { useRouter } from "expo-router"; // 1. IMPORT THE ROUTER INSTANCE HOOK
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from "react";
@@ -16,6 +17,7 @@ const SUPPORTED_LANGUAGES = [
 ];
 
 function SettingsPage() {
+    const router = useRouter(); // 2. INSTANTIATE THE ROUTER CONTROLLER
     const { i18n, t } = useTranslation();
     const { logout } = useAuth();
     const [isVisible, setIsVisible] = useState(false);
@@ -40,12 +42,17 @@ function SettingsPage() {
     // 4. ACTION CONTROLLER TO SANITIZE TOKENS AND SHIFT APP THE ROUTE GATE TREE
     const handleSystemLogout = async () => {
         try {
+            // Securely wipe current storage key access profiles
             await SecureStore.deleteItemAsync('accessToken');
             await SecureStore.deleteItemAsync('refreshToken');
         } catch (e) {
             console.error('Storage clear failure during logout context transition:', e);
         } finally {
-            logout(); // Forces root layout layout guard switch back to login screen tree
+            // Flip context state management values
+            logout(); 
+            
+            // 3. FIXED: Explicitly redirect out of the active Tab navigation group directly to the Login gateway
+            router.replace('/auth/login');
         }
     };
 
