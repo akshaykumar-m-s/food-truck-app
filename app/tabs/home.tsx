@@ -1,12 +1,22 @@
 import { FloatingOrderStatus, HomeSection, HomeSectionData, OngoingOrderData } from '@/src/components/features/home';
 import { AppText } from '@/src/components/forms/global-text';
+import API_CONFIG from '@/src/config/api'; // Import your API layout definitions
 import Colors from '@/src/constants/colors';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import React from 'react';
+import { ProfileOnboardingOverlay } from 'app/screens/profile-onboarding-overlay';
+import * as SecureStore from 'expo-secure-store'; // Import SecureStore for authorization tokens
+import React, { useEffect, useState } from 'react'; // Added hook lifecycle tracking handlers
 import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// IMPORT THE NEW ONBOARDING OVERLAY COMPONENT
+
 function HomeScreen() {
+    // 1. ADD INTERCEPTION AND INTERACTION STATES
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [userEmail, setUserEmail] = useState('');
+    const [displayedName, setDisplayedName] = useState('Alex'); // Defaults to Alex if empty/skipped
+
     // Mock data for sections - this can come from API/state management
     const homeSections: HomeSectionData[] = [
         {
@@ -38,6 +48,40 @@ function HomeScreen() {
         activeSteps: 3,
     };
 
+    // 2. LIFECYCLE CHECK TO INTERCEPT COLD SESSION ENTRIES ON MOUNT
+    useEffect(() => {
+        const verifyProfileCompleteness = async () => {
+            try {
+                const token = await SecureStore.getItemAsync('accessToken');
+                
+                // CONNECTED: Hits GET /profile to see if the authenticated MongoDB record has name parameters filled
+                const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Authorization': token ? `Bearer ${token}` : '', //
+                        'app': 'Food Trckr'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    setUserEmail(data.email || '');
+                    
+                    if (data.name && data.name.trim() !== "") {
+                        setDisplayedName(data.name); // Hydrate name from MongoDB
+                    } else {
+                        setShowOnboarding(true); // Enforce onboarding modal if database fields are blank
+                    }
+                }
+            } catch (error) {
+                console.error("Profile check interception failure:", error);
+            }
+        };
+
+        verifyProfileCompleteness();
+    }, []);
+
     return (
         <View style={{ flex: 1, backgroundColor: '#FFF' }}>
             <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -60,9 +104,9 @@ function HomeScreen() {
                         </View>
                     </View>
 
-                    {/* User Greeting */}
+                    {/* User Greeting - Made dynamic using user data properties */}
                     <View style={styles.greetingRow}>
-                        <AppText style={styles.greetingText}>Hi Alex! What's cooking near to you?</AppText>
+<AppText style={styles.greetingText}>Hi {displayedName}! What's cooking near to you?</AppText>
                         <MaterialCommunityIcons name="silverware-variant" size={22} color={Colors.primary} />
                     </View>
 
@@ -116,12 +160,22 @@ function HomeScreen() {
                     />
                 )}
             </SafeAreaView>
+
+            {/* MOUNT AND SURFACE THE TINTED GATED ONBOARDING MODAL ACCORDINGLY */}
+            <ProfileOnboardingOverlay 
+                visible={showOnboarding}
+                initialEmail={userEmail}
+                onClose={(updatedName) => {
+                    setShowOnboarding(false);
+                    if (updatedName) setDisplayedName(updatedName); // Real-time title rerender hook
+                }}
+            />
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-   safeArea: { flex: 1 },
+    safeArea: { flex: 1 },
     scrollContent: { paddingBottom: 160 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingHorizontal: 20 },
     addressContainer: { flexDirection: 'row', alignItems: 'center', gap: 4 },

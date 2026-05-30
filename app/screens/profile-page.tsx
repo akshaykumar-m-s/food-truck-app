@@ -1,13 +1,15 @@
 import { BackButton } from "@/src/components/common/back-button";
 import { AppText } from "@/src/components/forms/global-text";
+import API_CONFIG from "@/src/config/api"; //
 import Colors from "@/src/constants/colors";
 import { Feather } from "@expo/vector-icons";
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store'; //
 import { StatusBar } from 'expo-status-bar';
 import { t } from 'i18next';
-import React, { useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, KeyboardType, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, KeyboardType, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 
 const COUNTRIES = [
     { label: 'Poland', value: '+48' },
@@ -15,15 +17,17 @@ const COUNTRIES = [
 ];
 
 function ProfilePage() {
+    const router = useRouter();
     const [editingField, setEditingField] = useState<string | null>(null);
     const [countryCode, setCountryCode] = useState('+48');
     const [showCountryPicker, setShowCountryPicker] = useState(false);
+    const [isLoadingData, setIsLoadingData] = useState(true);
 
-    const [backendData] = useState({
-        name: 'Jeremy',
-        surname: 'Smith',
-        phone: '987 654 321',
-        email: 'j.smith@foodtrckr.com',
+    const [backendData, setBackendData] = useState({
+        name: '',
+        surname: '',
+        phone: '',
+        email: '',
         isPhoneVerified: false,
         isEmailVerified: true
     });
@@ -36,6 +40,57 @@ function ProfilePage() {
         phone: useRef<TextInput>(null),
         email: useRef<TextInput>(null),
     };
+
+    // CONNECTED: Queries the exact profile model from your Mongo schema on mount
+    useEffect(() => {
+        const fetchUserProfileDetails = async () => {
+            try {
+                const token = await SecureStore.getItemAsync('accessToken');
+                
+                const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Authorization': token ? `Bearer ${token}` : '', //
+                        'app': 'Food Trckr'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data) {
+                    // Extract potential international country dials safely (+XX XXXXXXXXX)
+                    let rawPhone = data.phoneNumber || '';
+                    let rawPrefix = '+48';
+                    
+                    if (rawPhone.startsWith('+')) {
+                        const fragments = rawPhone.split(' ');
+                        rawPrefix = fragments[0];
+                        rawPhone = fragments.slice(1).join(' ');
+                    }
+
+                    const parsedProfilePayload = {
+                        name: data.name || '',
+                        surname: data.surname || '',
+                        phone: rawPhone,
+                        email: data.email || '',
+                        isPhoneVerified: !!data.phoneNumber,
+                        isEmailVerified: true
+                    };
+                    
+                    setCountryCode(rawPrefix);
+                    setBackendData(parsedProfilePayload);
+                    setFormData(parsedProfilePayload);
+                }
+            } catch (error) {
+                console.error("Profile fetching issue:", error);
+            } finally {
+                setIsLoadingData(false);
+            }
+        };
+
+        fetchUserProfileDetails();
+    }, []);
 
     const handleEditTrigger = (field: keyof typeof inputRefs) => {
         setEditingField(field);
@@ -50,10 +105,43 @@ function ProfilePage() {
 
     const hasChanges = JSON.stringify(formData) !== JSON.stringify(backendData) || countryCode !== '+48';
 
-    const handleSave = () => {
+    // CONNECTED: Syncs profile edits back to the MongoDB collections securely via the API
+    const handleSave = async () => {
         if (hasChanges) {
-            setEditingField(null);
-            setShowCountryPicker(false);
+            if (!formData.name.trim() || !formData.surname.trim() || !formData.phone.trim()) {
+                Alert.alert('Required Fields', "First Name, Last Name, and Phone Number are required.");
+                return;
+            }
+
+            try {
+                const token = await SecureStore.getItemAsync('accessToken');
+                const completePhoneString = formData.phone.trim() ? `${countryCode} ${formData.phone.trim()}` : '';
+
+                const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': token ? `Bearer ${token}` : '', //
+                        'app': 'Food Trckr'
+                    },
+                    body: JSON.stringify({
+                        name: formData.name.trim(),
+                        surname: formData.surname.trim(),
+                        phoneNumber: completePhoneString // Maps safely onto backend req.body.phoneNumber
+                    })
+                });
+
+                if (response.ok) {
+                    setBackendData({ ...formData });
+                    setEditingField(null);
+                    setShowCountryPicker(false);
+                    Alert.alert('Success', "Profile changes updated successfully.");
+                } else {
+                    Alert.alert('Error', "Unable to modify configuration settings.");
+                }
+            } catch (networkError) {
+                Alert.alert('Error', "Connection error.");
+            }
         }
     };
 
@@ -63,38 +151,29 @@ function ProfilePage() {
     const showEmailVerify = (isEmailChanged || !backendData.isEmailVerified) && editingField !== 'email';
     const showPhoneVerify = (isPhoneChanged || !backendData.isPhoneVerified) && editingField !== 'phone';
 
-    const router = useRouter();
-
+    if (isLoadingData) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' }}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+        );
+    }
 
     return (
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.safeArea}>
             <StatusBar style="dark" />
             <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
                 <View style={{ flex: 1 }}>
-                    <View style={styles.header}>
-                        <BackButton color={Colors.primary} />
-                    </View>
-
-                    <ScrollView
-                        contentContainerStyle={styles.scrollContainer}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                    >
-                        <AppText style={styles.title}>
-                            {t('account_page.profile_page.title')}
-                        </AppText>
+                    <View style={styles.header}><BackButton color={Colors.primary} /></View>
+                    <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                        <AppText style={styles.title}>{t('account_page.profile_page.title')}</AppText>
 
                         <View style={styles.imageContainer}>
-                            <View style={styles.profileCircle}>
-                                <Feather name="user" size={60} color="#FFF" />
-                            </View>
-                            <TouchableOpacity style={styles.pencilButton}>
-                                <Feather name="edit-2" size={16} color="#FFF" />
-                            </TouchableOpacity>
+                            <View style={styles.profileCircle}><Feather name="user" size={60} color="#FFF" /></View>
+                            <TouchableOpacity style={styles.pencilButton}><Feather name="edit-2" size={16} color="#FFF" /></TouchableOpacity>
                         </View>
 
                         <View style={styles.inputGroup}>
-                            {/* Render Name and Surname */}
                             {([
                                 { id: 'name', label: t('account_page.profile_page.name'), type: 'default' },
                                 { id: 'surname', label: t('account_page.profile_page.surename'), type: 'default' },
@@ -104,14 +183,7 @@ function ProfilePage() {
                                     <View key={field.id} style={[styles.inputWrapper, isFieldActive ? styles.activeWrapper : styles.disabledWrapper]}>
                                         <View style={{ flex: 1 }}>
                                             <AppText style={[styles.label, !isFieldActive && styles.disabledLabel]}>{field.label}</AppText>
-                                            <TextInput
-                                                ref={inputRefs[field.id]}
-                                                style={[styles.inputValue, !isFieldActive && styles.disabledText]}
-                                                value={formData[field.id]}
-                                                editable={isFieldActive}
-                                                keyboardType={field.type as KeyboardType}
-                                                onChangeText={(txt) => setFormData({ ...formData, [field.id]: txt })}
-                                            />
+                                            <TextInput ref={inputRefs[field.id]} style={[styles.inputValue, !isFieldActive && styles.disabledText]} value={formData[field.id]} editable={isFieldActive} keyboardType={field.type as KeyboardType} onChangeText={(txt) => setFormData({ ...formData, [field.id]: txt })} />
                                         </View>
                                         <TouchableOpacity onPress={() => isFieldActive ? handleCancelEdit(field.id) : handleEditTrigger(field.id)}>
                                             <Feather name={isFieldActive ? "x" : "edit-3"} size={18} color={isFieldActive ? "#5c5b5bff" : Colors.primary} />
@@ -120,99 +192,45 @@ function ProfilePage() {
                                 );
                             })}
 
-                            {/* Specialized Phone Field */}
                             <View style={[styles.inputWrapper, editingField === 'phone' ? styles.activeWrapper : styles.disabledWrapper]}>
                                 <View style={{ flex: 1 }}>
                                     <AppText style={[styles.label, editingField !== 'phone' && styles.disabledLabel]}>{t('account_page.profile_page.phone_number')}</AppText>
                                     <View style={styles.phoneInputRow}>
-                                        <TouchableOpacity
-                                            style={styles.countrySelector}
-                                            onPress={() => setShowCountryPicker(!showCountryPicker)}
-                                            disabled={editingField !== 'phone'}
-                                        >
+                                        <TouchableOpacity style={styles.countrySelector} onPress={() => setShowCountryPicker(!showCountryPicker)} disabled={editingField !== 'phone'}>
                                             <AppText style={[styles.inputValue, editingField !== 'phone' && styles.disabledText]}>{countryCode}</AppText>
                                             <Feather name="chevron-down" size={14} color={editingField === 'phone' ? Colors.primary : 'rgba(27, 4, 31, 0.3)'} style={{ marginLeft: 4 }} />
                                         </TouchableOpacity>
                                         <View style={[styles.divider, editingField !== 'phone' && { opacity: 0.2 }]} />
-                                        <TextInput
-                                            ref={inputRefs.phone}
-                                            style={[styles.inputValue, { flex: 1, padding: 0 }, editingField !== 'phone' && styles.disabledText]}
-                                            value={formData.phone}
-                                            editable={editingField === 'phone'}
-                                            keyboardType="phone-pad"
-                                            onChangeText={(txt) => setFormData({ ...formData, phone: txt })}
-                                        />
+                                        <TextInput ref={inputRefs.phone} style={[styles.inputValue, { flex: 1, padding: 0 }, editingField !== 'phone' && styles.disabledText]} value={formData.phone} editable={editingField === 'phone'} keyboardType="phone-pad" onChangeText={(txt) => setFormData({ ...formData, phone: txt })} />
                                     </View>
                                 </View>
-
                                 <View style={styles.rightActionContainer}>
-                                    {showPhoneVerify && (
-                                        <TouchableOpacity style={styles.verifyOutlineButton}>
-                                            <AppText style={styles.verifyButtonText}>Verify</AppText>
-                                        </TouchableOpacity>
-                                    )}
-                                    <TouchableOpacity onPress={() => editingField === 'phone' ? handleCancelEdit('phone') : handleEditTrigger('phone')}>
-                                        <Feather name={editingField === 'phone' ? "x" : "edit-3"} size={18} color={editingField === 'phone' ? "#5c5b5bff" : Colors.primary} />
-                                    </TouchableOpacity>
+                                    {showPhoneVerify && <TouchableOpacity style={styles.verifyOutlineButton}><AppText style={styles.verifyButtonText}>Verify</AppText></TouchableOpacity>}
+                                    <TouchableOpacity onPress={() => editingField === 'phone' ? handleCancelEdit('phone') : handleEditTrigger('phone')}><Feather name={editingField === 'phone' ? "x" : "edit-3"} size={18} color={editingField === 'phone' ? "#5c5b5bff" : Colors.primary} /></TouchableOpacity>
                                 </View>
 
                                 {showCountryPicker && editingField === 'phone' && (
                                     <View style={styles.pickerDropdown}>
                                         {COUNTRIES.map((c) => (
-                                            <TouchableOpacity
-                                                key={c.value}
-                                                style={styles.pickerItem}
-                                                onPress={() => { setCountryCode(c.value); setShowCountryPicker(false); }}
-                                            >
-                                                <AppText style={styles.pickerText}>{c.label} ({c.value})</AppText>
-                                            </TouchableOpacity>
+                                            <TouchableOpacity key={c.value} style={styles.pickerItem} onPress={() => { setCountryCode(c.value); setShowCountryPicker(false); }}><AppText style={styles.pickerText}>{c.label} ({c.value})</AppText></TouchableOpacity>
                                         ))}
                                     </View>
                                 )}
                             </View>
 
-                            {/* Email Field */}
                             <View style={[styles.inputWrapper, editingField === 'email' ? styles.activeWrapper : styles.disabledWrapper]}>
                                 <View style={{ flex: 1 }}>
                                     <AppText style={[styles.label, editingField !== 'email' && styles.disabledLabel]}>{t('account_page.profile_page.email_address')}</AppText>
-                                    <TextInput
-                                        ref={inputRefs.email}
-                                        style={[styles.inputValue, editingField !== 'email' && styles.disabledText]}
-                                        value={formData.email}
-                                        editable={editingField === 'email'}
-                                        keyboardType="email-address"
-                                        autoCapitalize="none"
-                                        onChangeText={(txt) => setFormData({ ...formData, email: txt })}
-                                    />
+                                    <TextInput ref={inputRefs.email} style={[styles.inputValue, editingField !== 'email' && styles.disabledText]} value={formData.email} editable={editingField === 'email'} keyboardType="email-address" autoCapitalize="none" onChangeText={(txt) => setFormData({ ...formData, email: txt })} />
                                 </View>
-
                                 <View style={styles.rightActionContainer}>
-                                    {showEmailVerify && (
-                                        <TouchableOpacity
-                                            style={styles.verifyOutlineButton}
-                                            // Navigate to the verification screen
-                                            onPress={() => {
-                                                router.push('/screens/email-verification')}}
-                                        >
-                                            <AppText style={styles.verifyButtonText}>Verify</AppText>
-                                        </TouchableOpacity>
-                                    )}
-                                    <TouchableOpacity onPress={() => editingField === 'email' ? handleCancelEdit('email') : handleEditTrigger('email')}>
-                                        <Feather
-                                            name={editingField === 'email' ? "x" : "edit-3"}
-                                            size={18}
-                                            color={editingField === 'email' ? "#5c5b5bff" : Colors.primary}
-                                        />
-                                    </TouchableOpacity>
+                                    {showEmailVerify && <TouchableOpacity style={styles.verifyOutlineButton} onPress={() => router.push('/screens/email-verification')}><AppText style={styles.verifyButtonText}>Verify</AppText></TouchableOpacity>}
+                                    <TouchableOpacity onPress={() => editingField === 'email' ? handleCancelEdit('email') : handleEditTrigger('email')}><Feather name={editingField === 'email' ? "x" : "edit-3"} size={18} color={editingField === 'email' ? "#5c5b5bff" : Colors.primary} /></TouchableOpacity>
                                 </View>
                             </View>
                         </View>
 
-                        <TouchableOpacity
-                            style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]}
-                            onPress={handleSave}
-                            disabled={!hasChanges}
-                        >
+                        <TouchableOpacity style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]} onPress={handleSave} disabled={!hasChanges}>
                             <AppText style={styles.saveButtonText}>{t('account_page.profile_page.save_changes')}</AppText>
                         </TouchableOpacity>
                     </ScrollView>
