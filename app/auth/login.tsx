@@ -67,7 +67,6 @@ function LoginScreen() {
 
   const showError = (message: string) => {
     setIsLoading(false);
-    Alert.alert('Sign-In Error', message);
   };
 
   const createUserUsingFirebase = async (payload: {
@@ -98,7 +97,6 @@ function LoginScreen() {
 
   const handleEmailLogin = async () => {
     if (!email.trim()) {
-      Alert.alert('Login Error', 'Please enter a valid email address.');
       return;
     }
 

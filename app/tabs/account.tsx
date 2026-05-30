@@ -1,14 +1,18 @@
 import { AppText } from '@/src/components/forms/global-text';
+import API_CONFIG from '@/src/config/api'; // Integrated base API configuration paths
 import Colors from '@/src/constants/colors';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store'; // Secure store integration for token parsing
+import { StatusBar } from 'expo-status-bar';
 import { t } from 'i18next';
-import React from 'react';
+import React, { useEffect, useState } from 'react'; // Hook integrations
 import {
+    ActivityIndicator,
     ScrollView,
     StyleSheet,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -33,31 +37,66 @@ const MenuItem: React.FC<MenuItemProps> = ({ icon, label, isNew, onPress }) => (
     </TouchableOpacity>
 );
 
-const SectionHeader = ({ title }: { title: string }) => (
-    <AppText style={styles.sectionHeader}>{title}</AppText>
-);
-
-const MOCK_GLOBAL_USER = {
-    name: "Wojciech Stanisław",
-    profileImage: null
-};
-
 function AccountScreen() {
     const router = useRouter();
+    
+    // Dynamic profile and loading state handles
+    const [firstName, setFirstName] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
+
+    // Fetch user details from backend collection on mount
+    useEffect(() => {
+        const loadUserHeaderProfile = async () => {
+            try {
+                const token = await SecureStore.getItemAsync('accessToken');
+                
+                const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Authorization': token ? `Bearer ${token}` : '',
+                        'app': 'Food Trckr'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setFirstName(data.name || 'User');
+                }
+            } catch (error) {
+                console.error("Account view context failed to load profile header:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadUserHeaderProfile();
+    }, []);
+
+    if (isLoading) {
+        return (
+            <View style={styles.loadingCenter}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+        );
+    }
 
     return (
         <SafeAreaView style={styles.safeArea}>
+            <StatusBar style="dark" />
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.container}>
 
                 {/* Header Section */}
                 <View style={styles.userHeader}>
-                    <AppText style={styles.userName}>{MOCK_GLOBAL_USER.name}</AppText>
+                    <AppText style={styles.userName} numberOfLines={1} ellipsizeMode="tail">
+                        {firstName}
+                    </AppText>
                     <TouchableOpacity style={styles.profileCircle}>
                         <Feather name="user" size={32} color="#FFF" />
                     </TouchableOpacity>
                 </View>
 
-                {/* 3x2 Grid Section */}
+                {/* 3x2 Grid Section - Restructured with tighter Figma spacing alignments */}
                 <View style={styles.quickActionsGrid}>
                     {[
                         { icon: 'user', label: 'Profile', lib: 'Feather', route: '/screens/profile-page' },
@@ -123,62 +162,71 @@ function AccountScreen() {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#FFF', // Reverted to clean white
+        backgroundColor: '#FFF',
+    },
+    loadingCenter: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
     },
     container: {
         paddingHorizontal: 25,
-        paddingBottom: 120, // Space for floating tab bar
+        paddingBottom: 120,
     },
     userHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginTop: 20,
-        marginBottom: 25,
+        marginBottom: 24,
     },
     userName: {
         fontSize: 28,
         fontWeight: 'bold',
         color: Colors.primary,
-        flex: 1
+        flex: 1,
+        marginRight: 12,
     },
     profileCircle: {
         width: 55, height: 55, borderRadius: 27.5,
         backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center',
     },
     iconBackground: {
-        marginBottom: 4,
-        height: 30,
+        marginBottom: 2,
+        height: 28,
         justifyContent: 'center',
         alignItems: 'center',
     },
+    // FIXED: Cleared messy flex padding bugs and introduced crisp rowGap layout controls
     quickActionsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'space-between',
         width: '100%',
-        // Reduce this margin to fix the excessive space issue
-        marginBottom: 0,
+        rowGap: 12, 
+        marginBottom: 28,
     },
+    // FIXED: Removed unstable aspectRatio, setting explicit proportions matching your 91x89 figma spec profile
     actionCard: {
-        width: '31%',
-        aspectRatio: 1,
+        width: '31.2%',
+        height: 90, 
         backgroundColor: Colors.accent,
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        paddingHorizontal: 4,
     },
     actionText: {
         fontSize: 12,
         color: Colors.primary,
         fontWeight: '500',
-        marginTop: 6,
+        marginTop: 4,
+        textAlign: 'center',
     },
     section: {
-        // Ensure consistent spacing between grid and list sections
         marginTop: 0,
-        marginBottom: 15,
+        marginBottom: 20,
         width: '100%',
     },
     sectionHeader: {
@@ -206,8 +254,6 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         marginLeft: 15,
     },
-
-    // Badges & Accents
     newBadge: {
         backgroundColor: Colors.mintGreen,
         paddingHorizontal: 8,
@@ -218,25 +264,6 @@ const styles = StyleSheet.create({
     newBadgeText: {
         fontSize: 10,
         color: '#1B041F',
-        fontWeight: 'bold',
-    },
-
-    // Logout Styling
-    logoutButton: {
-        backgroundColor: '#EB3C24',
-        height: 60,
-        borderRadius: 30,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginTop: 10,
-    },
-    logoutIcon: {
-        marginRight: 10,
-    },
-    logoutText: {
-        color: '#FFF',
-        fontSize: 18,
         fontWeight: 'bold',
     },
 });

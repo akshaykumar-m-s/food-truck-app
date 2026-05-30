@@ -1,15 +1,23 @@
 import { BackButton } from "@/src/components/common/back-button";
 import { AppText } from "@/src/components/forms/global-text";
-import API_CONFIG from "@/src/config/api"; //
+import API_CONFIG from "@/src/config/api";
 import Colors from "@/src/constants/colors";
 import { Feather } from "@expo/vector-icons";
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store'; //
+import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { t } from 'i18next';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, KeyboardType, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+
+// Import your extracted OTP component layout
+
+// Firebase implementation hooks
+import { Snackbar } from "@/components/common/snackbar";
+import { auth } from '@/src/firebase';
+import { PhoneAuthProvider } from 'firebase/auth';
+import { PhoneOtpModal } from "./phone-otp-modal";
 
 const COUNTRIES = [
     { label: 'Poland', value: '+48' },
@@ -22,6 +30,10 @@ function ProfilePage() {
     const [countryCode, setCountryCode] = useState('+48');
     const [showCountryPicker, setShowCountryPicker] = useState(false);
     const [isLoadingData, setIsLoadingData] = useState(true);
+
+    // Refactored state targets mapping into the isolated sub-component block
+    const [isOtpModalVisible, setIsOtpModalVisible] = useState(false);
+    const [verificationId, setVerificationId] = useState<string | null>(null);
 
     const [backendData, setBackendData] = useState({
         name: '',
@@ -41,17 +53,26 @@ function ProfilePage() {
         email: useRef<TextInput>(null),
     };
 
-    // CONNECTED: Queries the exact profile model from your Mongo schema on mount
+    const [snackbarConfig, setSnackbarConfig] = useState({
+        visible: false,
+        message: '',
+        type: 'info' as 'success' | 'error' | 'info'
+    });
+
+    const displayToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+        setSnackbarConfig({ visible: true, message, type });
+    };
+
     useEffect(() => {
         const fetchUserProfileDetails = async () => {
             try {
                 const token = await SecureStore.getItemAsync('accessToken');
-                
+
                 const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
                     method: 'GET',
                     headers: {
                         'Accept': 'application/json',
-                        'Authorization': token ? `Bearer ${token}` : '', //
+                        'Authorization': token ? `Bearer ${token}` : '',
                         'app': 'Food Trckr'
                     }
                 });
@@ -59,10 +80,9 @@ function ProfilePage() {
                 const data = await response.json();
 
                 if (response.ok && data) {
-                    // Extract potential international country dials safely (+XX XXXXXXXXX)
                     let rawPhone = data.phoneNumber || '';
                     let rawPrefix = '+48';
-                    
+
                     if (rawPhone.startsWith('+')) {
                         const fragments = rawPhone.split(' ');
                         rawPrefix = fragments[0];
@@ -73,11 +93,11 @@ function ProfilePage() {
                         name: data.name || '',
                         surname: data.surname || '',
                         phone: rawPhone,
+                        isPhoneVerified: data.isPhoneVerified || false,
                         email: data.email || '',
-                        isPhoneVerified: !!data.phoneNumber,
                         isEmailVerified: true
                     };
-                    
+
                     setCountryCode(rawPrefix);
                     setBackendData(parsedProfilePayload);
                     setFormData(parsedProfilePayload);
@@ -92,6 +112,50 @@ function ProfilePage() {
         fetchUserProfileDetails();
     }, []);
 
+    const handleSendPhoneOtp = async () => {
+        const trimmedPhone = formData.phone.trim();
+        if (!trimmedPhone) {
+            Alert.alert('Validation Error', 'Please input a valid phone number before attempting verification.');
+            return;
+        }
+
+        let cleanDigits = trimmedPhone.replace(/[^0-9]/g, '');
+        const targetCountryDigits = countryCode.replace(/[^0-9]/g, '');
+
+        if (cleanDigits.startsWith(targetCountryDigits)) {
+            cleanDigits = cleanDigits.slice(targetCountryDigits.length);
+        }
+
+        if (cleanDigits.startsWith('0')) {
+            cleanDigits = cleanDigits.slice(1);
+        }
+
+        const standardE164PhoneNumber = `${countryCode}${cleanDigits}`;
+        setIsLoadingData(true);
+
+        try {
+            const provider = new PhoneAuthProvider(auth);
+            const apiApplicationVerifier = {
+                type: 'recaptcha',
+                verify: async () => 'mock-recaptcha-token',
+                reset: () => { },
+                _reset: () => { }
+            };
+
+            const generatedId = await provider.verifyPhoneNumber(
+                standardE164PhoneNumber,
+                apiApplicationVerifier as any
+            );
+
+            setVerificationId(generatedId);
+            setIsOtpModalVisible(true);
+        } catch (error: any) {
+            Alert.alert('Verification Error', error?.message || 'Firebase phone authentication failed.');
+        } finally {
+            setIsLoadingData(false);
+        }
+    };
+
     const handleEditTrigger = (field: keyof typeof inputRefs) => {
         setEditingField(field);
         setTimeout(() => inputRefs[field].current?.focus(), 100);
@@ -105,11 +169,10 @@ function ProfilePage() {
 
     const hasChanges = JSON.stringify(formData) !== JSON.stringify(backendData) || countryCode !== '+48';
 
-    // CONNECTED: Syncs profile edits back to the MongoDB collections securely via the API
     const handleSave = async () => {
         if (hasChanges) {
             if (!formData.name.trim() || !formData.surname.trim() || !formData.phone.trim()) {
-                Alert.alert('Required Fields', "First Name, Last Name, and Phone Number are required.");
+                displayToast('First Name, Last Name, and Phone Number are required.');
                 return;
             }
 
@@ -121,13 +184,13 @@ function ProfilePage() {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': token ? `Bearer ${token}` : '', //
+                        'Authorization': token ? `Bearer ${token}` : '',
                         'app': 'Food Trckr'
                     },
                     body: JSON.stringify({
                         name: formData.name.trim(),
                         surname: formData.surname.trim(),
-                        phoneNumber: completePhoneString // Maps safely onto backend req.body.phoneNumber
+                        phoneNumber: completePhoneString
                     })
                 });
 
@@ -135,21 +198,19 @@ function ProfilePage() {
                     setBackendData({ ...formData });
                     setEditingField(null);
                     setShowCountryPicker(false);
-                    Alert.alert('Success', "Profile changes updated successfully.");
+                    displayToast('Changes synchronized cleanly to your account profile.', 'success');
                 } else {
-                    Alert.alert('Error', "Unable to modify configuration settings.");
+                    displayToast("Unable to modify cloud configuration metrics.");
                 }
             } catch (networkError) {
-                Alert.alert('Error', "Connection error.");
+                displayToast('Network transaction execution timeout.');
             }
         }
     };
 
     const isEmailChanged = formData.email !== backendData.email;
-    const isPhoneChanged = formData.phone !== backendData.phone;
-
     const showEmailVerify = (isEmailChanged || !backendData.isEmailVerified) && editingField !== 'email';
-    const showPhoneVerify = (isPhoneChanged || !backendData.isPhoneVerified) && editingField !== 'phone';
+    const showPhoneVerify = !backendData.isPhoneVerified && formData.phone.trim().length > 0 && editingField !== 'phone';
 
     if (isLoadingData) {
         return (
@@ -204,8 +265,17 @@ function ProfilePage() {
                                         <TextInput ref={inputRefs.phone} style={[styles.inputValue, { flex: 1, padding: 0 }, editingField !== 'phone' && styles.disabledText]} value={formData.phone} editable={editingField === 'phone'} keyboardType="phone-pad" onChangeText={(txt) => setFormData({ ...formData, phone: txt })} />
                                     </View>
                                 </View>
+
                                 <View style={styles.rightActionContainer}>
-                                    {showPhoneVerify && <TouchableOpacity style={styles.verifyOutlineButton}><AppText style={styles.verifyButtonText}>Verify</AppText></TouchableOpacity>}
+                                    {backendData.isPhoneVerified ? (
+                                        <View style={styles.verifiedContainerBadge}>
+                                            <AppText style={styles.verifiedTextLabel}>Verified</AppText>
+                                        </View>
+                                    ) : showPhoneVerify && (
+                                        <TouchableOpacity style={styles.verifyOutlineButton} onPress={handleSendPhoneOtp}>
+                                            <AppText style={styles.verifyButtonText}>Verify</AppText>
+                                        </TouchableOpacity>
+                                    )}
                                     <TouchableOpacity onPress={() => editingField === 'phone' ? handleCancelEdit('phone') : handleEditTrigger('phone')}><Feather name={editingField === 'phone' ? "x" : "edit-3"} size={18} color={editingField === 'phone' ? "#5c5b5bff" : Colors.primary} /></TouchableOpacity>
                                 </View>
 
@@ -234,8 +304,33 @@ function ProfilePage() {
                             <AppText style={styles.saveButtonText}>{t('account_page.profile_page.save_changes')}</AppText>
                         </TouchableOpacity>
                     </ScrollView>
+                    <Snackbar
+                        visible={snackbarConfig.visible}
+                        message={snackbarConfig.message}
+                        type={snackbarConfig.type}
+                        onDismiss={() => setSnackbarConfig(prev => ({ ...prev, visible: false }))}
+                    />
                 </View>
             </TouchableWithoutFeedback>
+
+            {/* MOUNT EXTRACTED STANDALONE OTP SUBSYSTEM MODAL */}
+            <PhoneOtpModal
+                visible={isOtpModalVisible}
+                verificationId={verificationId}
+                countryCode={countryCode}
+                phoneNumber={formData.phone}
+                firstName={formData.name}
+                lastName={formData.surname}
+                onClose={() => setIsOtpModalVisible(false)}
+                onResendRequested={handleSendPhoneOtp}
+                onSuccess={() => {
+                    setIsOtpModalVisible(false);
+                    const updatedState = { ...formData, isPhoneVerified: true };
+                    setBackendData(updatedState);
+                    setFormData(updatedState);
+                    displayToast('Your phone number has been verified and synced securely.', 'success');
+                }}
+            />
         </KeyboardAvoidingView>
     );
 }
@@ -260,8 +355,6 @@ const styles = StyleSheet.create({
     disabledLabel: { opacity: 0.4 },
     disabledText: { color: 'rgba(27, 4, 31, 0.4)' },
     rightActionContainer: { flexDirection: 'row', alignItems: 'center' },
-    verifyPill: { borderBottomWidth: 1, borderBottomColor: Colors.primary, marginRight: 12, paddingBottom: 1 },
-    verifyText: { color: Colors.primary, fontSize: 13, fontWeight: '600' },
     saveButton: { backgroundColor: Colors.primary, width: '100%', height: 55, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginTop: 20 },
     saveButtonDisabled: { backgroundColor: 'rgba(27, 4, 31, 0.2)', opacity: 0.5 },
     saveButtonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
@@ -269,16 +362,30 @@ const styles = StyleSheet.create({
     pickerItem: { paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#EEE' },
     pickerText: { fontSize: 14, color: Colors.primary, fontWeight: '500' },
     verifyOutlineButton: {
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: Colors.primary,
         borderRadius: 20,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
+        paddingHorizontal: 14,
+        paddingVertical: 5,
         marginRight: 10,
         backgroundColor: 'transparent',
     },
     verifyButtonText: {
         color: Colors.primary,
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    verifiedContainerBadge: {
+        borderWidth: 1.5,
+        borderColor: 'rgba(27, 4, 31, 0.2)',
+        borderRadius: 20,
+        paddingHorizontal: 14,
+        paddingVertical: 5,
+        marginRight: 10,
+        backgroundColor: 'rgba(27, 4, 31, 0.05)',
+    },
+    verifiedTextLabel: {
+        color: 'rgba(27, 4, 31, 0.5)',
         fontSize: 12,
         fontWeight: '700',
     },
