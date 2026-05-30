@@ -3,11 +3,13 @@
     "name": "food-truck-app",
     "slug": "food-truck-app",
     "version": "1.0.0",
+    "sdkVersion": "52.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon-1.png",
     "assetBundlePatterns": [
       "assets/fonts/*",
-      "assets/images/*"
+      "assets/images/*",
+      "assets/icons/*"
     ],
     "scheme": [
       "food-truck-app",
@@ -40,6 +42,17 @@
     "plugins": [
       "expo-router",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
@@ -52,7 +65,8 @@
         }
       ],
       "expo-font",
-      "expo-localization"
+      "expo-localization",
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,
