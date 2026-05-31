@@ -1,3 +1,5 @@
+import { Snackbar } from "@/components/common/snackbar";
+import { auth } from "@/firebase";
 import { BackButton } from "@/src/components/common/back-button";
 import { AppText } from "@/src/components/forms/global-text";
 import API_CONFIG from "@/src/config/api";
@@ -7,17 +9,12 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
+import { PhoneAuthProvider } from "firebase/auth";
 import { t } from 'i18next';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, KeyboardType, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
-
-// Import your extracted OTP component layout
-
-// Firebase implementation hooks
-import { Snackbar } from "@/components/common/snackbar";
-import { auth } from '@/src/firebase';
-import { PhoneAuthProvider } from 'firebase/auth';
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, KeyboardType, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { PhoneOtpModal } from "./phone-otp-modal";
+
 
 const COUNTRIES = [
     { label: 'Poland', value: '+48' },
@@ -28,12 +25,18 @@ function ProfilePage() {
     const router = useRouter();
     const [editingField, setEditingField] = useState<string | null>(null);
     const [countryCode, setCountryCode] = useState('+48');
+    const [initialCountryCode, setInitialCountryCode] = useState('+48'); // FIXED: Track pristine country code baseline
     const [showCountryPicker, setShowCountryPicker] = useState(false);
     const [isLoadingData, setIsLoadingData] = useState(true);
 
-    // Refactored state targets mapping into the isolated sub-component block
     const [isOtpModalVisible, setIsOtpModalVisible] = useState(false);
     const [verificationId, setVerificationId] = useState<string | null>(null);
+
+    const [snackbarConfig, setSnackbarConfig] = useState({
+        visible: false,
+        message: '',
+        type: 'info' as 'success' | 'error' | 'info'
+    });
 
     const [backendData, setBackendData] = useState({
         name: '',
@@ -53,26 +56,16 @@ function ProfilePage() {
         email: useRef<TextInput>(null),
     };
 
-    const [snackbarConfig, setSnackbarConfig] = useState({
-        visible: false,
-        message: '',
-        type: 'info' as 'success' | 'error' | 'info'
-    });
-
-    const displayToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
-        setSnackbarConfig({ visible: true, message, type });
-    };
-
     useEffect(() => {
         const fetchUserProfileDetails = async () => {
             try {
                 const token = await SecureStore.getItemAsync('accessToken');
-
+                
                 const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/profile`, {
                     method: 'GET',
                     headers: {
                         'Accept': 'application/json',
-                        'Authorization': token ? `Bearer ${token}` : '',
+                        'Authorization': token ? `Bearer ${token}` : '', 
                         'app': 'Food Trckr'
                     }
                 });
@@ -82,7 +75,7 @@ function ProfilePage() {
                 if (response.ok && data) {
                     let rawPhone = data.phoneNumber || '';
                     let rawPrefix = '+48';
-
+                    
                     if (rawPhone.startsWith('+')) {
                         const fragments = rawPhone.split(' ');
                         rawPrefix = fragments[0];
@@ -93,12 +86,13 @@ function ProfilePage() {
                         name: data.name || '',
                         surname: data.surname || '',
                         phone: rawPhone,
-                        isPhoneVerified: data.isPhoneVerified || false,
+                        isPhoneVerified: data.isPhoneVerified || false, 
                         email: data.email || '',
                         isEmailVerified: true
                     };
-
+                    
                     setCountryCode(rawPrefix);
+                    setInitialCountryCode(rawPrefix); // FIXED: Capture initial country prefix dynamically
                     setBackendData(parsedProfilePayload);
                     setFormData(parsedProfilePayload);
                 }
@@ -112,10 +106,14 @@ function ProfilePage() {
         fetchUserProfileDetails();
     }, []);
 
+    const displayToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
+        setSnackbarConfig({ visible: true, message, type });
+    };
+
     const handleSendPhoneOtp = async () => {
         const trimmedPhone = formData.phone.trim();
         if (!trimmedPhone) {
-            Alert.alert('Validation Error', 'Please input a valid phone number before attempting verification.');
+            displayToast('Please input a valid phone number before attempting verification.');
             return;
         }
 
@@ -138,19 +136,19 @@ function ProfilePage() {
             const apiApplicationVerifier = {
                 type: 'recaptcha',
                 verify: async () => 'mock-recaptcha-token',
-                reset: () => { },
-                _reset: () => { }
+                reset: () => {},
+                _reset: () => {} 
             };
 
             const generatedId = await provider.verifyPhoneNumber(
-                standardE164PhoneNumber,
+                standardE164PhoneNumber, 
                 apiApplicationVerifier as any
             );
-
+            
             setVerificationId(generatedId);
             setIsOtpModalVisible(true);
         } catch (error: any) {
-            Alert.alert('Verification Error', error?.message || 'Firebase phone authentication failed.');
+            displayToast(error?.message || 'Firebase phone authentication failed.');
         } finally {
             setIsLoadingData(false);
         }
@@ -167,7 +165,8 @@ function ProfilePage() {
         if (field === 'phone') setShowCountryPicker(false);
     };
 
-    const hasChanges = JSON.stringify(formData) !== JSON.stringify(backendData) || countryCode !== '+48';
+    // FIXED: Strict boolean expression gate that catches both form fields and dropdown mutations perfectly
+    const hasChanges = JSON.stringify(formData) !== JSON.stringify(backendData) || countryCode !== initialCountryCode;
 
     const handleSave = async () => {
         if (hasChanges) {
@@ -175,6 +174,8 @@ function ProfilePage() {
                 displayToast('First Name, Last Name, and Phone Number are required.');
                 return;
             }
+
+            const isPhoneChanged = formData.phone.trim() !== backendData.phone.trim() || countryCode !== initialCountryCode;
 
             try {
                 const token = await SecureStore.getItemAsync('accessToken');
@@ -184,7 +185,7 @@ function ProfilePage() {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': token ? `Bearer ${token}` : '',
+                        'Authorization': token ? `Bearer ${token}` : '', 
                         'app': 'Food Trckr'
                     },
                     body: JSON.stringify({
@@ -195,12 +196,22 @@ function ProfilePage() {
                 });
 
                 if (response.ok) {
-                    setBackendData({ ...formData });
+                    const targetVerificationStatus = isPhoneChanged ? false : backendData.isPhoneVerified;
+
+                    const updatedStatePayload = {
+                        ...formData,
+                        isPhoneVerified: targetVerificationStatus
+                    };
+
+                    setInitialCountryCode(countryCode); // FIXED: Resets pristine prefix baseline on successful save
+                    setBackendData(updatedStatePayload);
+                    setFormData(updatedStatePayload);
                     setEditingField(null);
                     setShowCountryPicker(false);
+                    
                     displayToast('Changes synchronized cleanly to your account profile.', 'success');
                 } else {
-                    displayToast("Unable to modify cloud configuration metrics.");
+                    displayToast('Unable to modify cloud configuration metrics.');
                 }
             } catch (networkError) {
                 displayToast('Network transaction execution timeout.');
@@ -265,7 +276,7 @@ function ProfilePage() {
                                         <TextInput ref={inputRefs.phone} style={[styles.inputValue, { flex: 1, padding: 0 }, editingField !== 'phone' && styles.disabledText]} value={formData.phone} editable={editingField === 'phone'} keyboardType="phone-pad" onChangeText={(txt) => setFormData({ ...formData, phone: txt })} />
                                     </View>
                                 </View>
-
+                                
                                 <View style={styles.rightActionContainer}>
                                     {backendData.isPhoneVerified ? (
                                         <View style={styles.verifiedContainerBadge}>
@@ -304,17 +315,10 @@ function ProfilePage() {
                             <AppText style={styles.saveButtonText}>{t('account_page.profile_page.save_changes')}</AppText>
                         </TouchableOpacity>
                     </ScrollView>
-                    <Snackbar
-                        visible={snackbarConfig.visible}
-                        message={snackbarConfig.message}
-                        type={snackbarConfig.type}
-                        onDismiss={() => setSnackbarConfig(prev => ({ ...prev, visible: false }))}
-                    />
                 </View>
             </TouchableWithoutFeedback>
 
-            {/* MOUNT EXTRACTED STANDALONE OTP SUBSYSTEM MODAL */}
-            <PhoneOtpModal
+            <PhoneOtpModal 
                 visible={isOtpModalVisible}
                 verificationId={verificationId}
                 countryCode={countryCode}
@@ -326,10 +330,17 @@ function ProfilePage() {
                 onSuccess={() => {
                     setIsOtpModalVisible(false);
                     const updatedState = { ...formData, isPhoneVerified: true };
+                    setInitialCountryCode(countryCode); // Sync prefix base on verified success
                     setBackendData(updatedState);
                     setFormData(updatedState);
-                    displayToast('Your phone number has been verified and synced securely.', 'success');
                 }}
+            />
+
+            <Snackbar 
+                visible={snackbarConfig.visible}
+                message={snackbarConfig.message}
+                type={snackbarConfig.type}
+                onDismiss={() => setSnackbarConfig(prev => ({ ...prev, visible: false }))}
             />
         </KeyboardAvoidingView>
     );

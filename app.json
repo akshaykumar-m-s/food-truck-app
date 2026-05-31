@@ -3,7 +3,6 @@
     "name": "food-truck-app",
     "slug": "food-truck-app",
     "version": "1.0.0",
-    "sdkVersion": "52.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon-1.png",
     "assetBundlePatterns": [
